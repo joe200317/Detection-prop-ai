@@ -1,0 +1,97 @@
+from app.services.classify import classify
+from app.services.vector_search import cosine, group_by_inventory
+
+
+def _candidate(inventory_id: str, score: float) -> dict:
+    return {
+        "inventoryId": inventory_id,
+        "name": inventory_id,
+        "bestSimilarity": score,
+        "bestImageUrl": f"/uploads/{inventory_id}.jpg",
+    }
+
+
+def test_exact_requires_both_scores():
+    detection = {"detectedObject": "Anchor", "usable": True, "confidence": 0.96}
+    decision = classify(
+        detection=detection,
+        candidates=[_candidate("PROP-001", 0.94)],
+        verification={"decision": "EXACT", "inventoryId": "PROP-001", "confidence": 0.94, "reason": "same arms"},
+    )
+    assert decision["matchStatus"] == "EXACT"
+    assert decision["inventoryItemId"] == "PROP-001"
+    assert decision["finalConfidence"] == 0.94
+
+
+def test_high_vector_and_low_verification_needs_review():
+    decision = classify(
+        detection={"detectedObject": "Anchor", "usable": True, "confidence": 0.96},
+        candidates=[_candidate("PROP-001", 0.93)],
+        verification={"decision": "EXACT", "inventoryId": "PROP-001", "confidence": 0.55, "reason": "unsure"},
+    )
+    assert decision["matchStatus"] == "NEEDS_REVIEW"
+    assert decision["matchStatus"] != "EXACT"
+
+
+def test_similar_and_missing_and_not_detected():
+    similar = classify(
+        detection={"detectedObject": "Wooden Chest", "usable": True, "confidence": 0.9},
+        candidates=[_candidate("PROP-024", 0.88)],
+        verification={"decision": "SIMILAR", "inventoryId": "PROP-024", "confidence": 0.8, "reason": "similar chest"},
+    )
+    missing = classify(
+        detection={"detectedObject": "Pirate Chest", "usable": True, "confidence": 0.91},
+        candidates=[_candidate("PROP-001", 0.4)],
+        verification=None,
+    )
+    not_detected = classify(
+        detection={"detectedObject": "", "usable": False, "confidence": 0.2},
+        candidates=[],
+        verification=None,
+    )
+    assert similar["matchStatus"] == "SIMILAR"
+    assert missing["matchStatus"] == "MISSING"
+    assert missing["inventoryItemId"] is None
+    assert not_detected["matchStatus"] == "NOT_DETECTED"
+
+
+def test_close_candidates_need_review():
+    decision = classify(
+        detection={"detectedObject": "Rope", "usable": True, "confidence": 0.95},
+        candidates=[_candidate("PROP-002", 0.93), _candidate("PROP-010", 0.91)],
+        verification={"decision": "EXACT", "inventoryId": "PROP-002", "confidence": 0.95, "reason": "rope"},
+    )
+    assert decision["matchStatus"] == "NEEDS_REVIEW"
+
+
+def test_group_limit_keeps_strongest_candidates():
+    rows = [
+        {
+            "inventoryId": f"PROP-{index:03d}",
+            "name": "Item",
+            "imageId": "a",
+            "imageUrl": "a.jpg",
+            "similarity": 1 - (index * 0.01),
+            "status": "available",
+        }
+        for index in range(1, 6)
+    ]
+    assert [item["inventoryId"] for item in group_by_inventory(rows, 2)] == ["PROP-001", "PROP-002"]
+
+
+def test_vector_search_keeps_best_angle():
+    grouped = group_by_inventory(
+        [
+            {"inventoryId": "PROP-001", "name": "Anchor", "imageId": "front", "imageUrl": "front.jpg", "similarity": 0.91, "status": "reserved"},
+            {"inventoryId": "PROP-001", "name": "Anchor", "imageId": "side", "imageUrl": "side.jpg", "similarity": 0.97, "status": "reserved"},
+            {"inventoryId": "PROP-023", "name": "Hook", "imageId": "front", "imageUrl": "hook.jpg", "similarity": 0.79, "status": "available"},
+        ],
+        limit=5,
+    )
+    assert grouped[0]["inventoryId"] == "PROP-001"
+    assert grouped[0]["bestImageId"] == "side"
+    assert grouped[0]["bestSimilarity"] == 0.97
+    assert grouped[0]["status"] == "reserved"
+    assert len(grouped[0]["imageScores"]) == 2
+    assert cosine([1, 0], [1, 0]) == 1
+    assert cosine([1, 0], [0, 1]) == 0
