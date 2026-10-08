@@ -57,7 +57,7 @@ def classify(
                 vector,
                 ver_confidence,
                 min(vector or 0, ver_confidence),
-                "Vector search and Qwen verification disagree.",
+                "Vector search and Gemini verification disagree.",
             )
         return _decision(
             "MISSING",
@@ -82,7 +82,7 @@ def classify(
         )
 
     if ver_confidence is not None and ver_confidence < settings.similar_threshold:
-        return uncertain("Vector similarity and Qwen verification do not both support an exact match.")
+        return uncertain("Vector similarity and Gemini verification do not both support an exact match.")
 
     agreed_exact = (
         ver_decision == "EXACT"
@@ -104,7 +104,7 @@ def classify(
         )
 
     if ver_decision == "NO_MATCH":
-        return uncertain("Vector search and Qwen verification disagree.")
+        return uncertain("Vector search and Gemini verification disagree.")
     if close:
         return uncertain("Multiple inventory candidates are too close to choose safely.")
     if ver_decision == "EXACT" and (ver_confidence is None or ver_confidence < settings.exact_threshold or vector < settings.exact_threshold):

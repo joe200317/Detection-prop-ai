@@ -8,7 +8,7 @@ from pymongo.errors import DuplicateKeyError
 from app.config import settings
 from app.services.errors import NotFoundError, RequestError
 from app.services.ids import next_id
-from app.services.qwen import get_qwen_client
+from app.services.gemini import get_gemini_client
 from app.services.storage import delete_stored, save_image, sha256_bytes
 
 DONE_STATUSES = {"EXACT", "SIMILAR", "MISSING", "NOT_DETECTED", "NEEDS_REVIEW", "AI_FAILED"}
@@ -304,7 +304,7 @@ async def add_inventory_image(
     image_hash = sha256_bytes(data)
     embedding = None
     warning = None
-    client = get_qwen_client()
+    client = get_gemini_client()
     try:
         embedding, _usage = await embed_with_cache(db, data, content_type, client)
     except Exception as exc:

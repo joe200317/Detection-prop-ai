@@ -7,7 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.config import settings
 from app.services.classify import classify
 from app.services.errors import AIServiceError
-from app.services.qwen import get_qwen_client
+from app.services.gemini import get_gemini_client
 from app.services.storage import read_stored, sha256_bytes
 from app.services.themes import get_theme, now, save_prop_result
 from app.services.vector_search import search_inventory_images
@@ -59,7 +59,7 @@ def content_type_for(url: str, fallback: str = "image/jpeg") -> str:
 
 async def process_prop(db: AsyncIOMotorDatabase, prop: dict[str, Any], *, use_cache: bool = True) -> dict[str, Any]:
     started = time.perf_counter()
-    client = get_qwen_client()
+    client = get_gemini_client()
     theme = await get_theme(db, prop["themeId"])
     await db.theme_props.update_one(
         {"propId": prop["propId"]},
@@ -124,8 +124,8 @@ async def process_prop(db: AsyncIOMotorDatabase, prop: dict[str, Any], *, use_ca
             "vectorSimilarity": saved.get("vectorSimilarity"),
             "verificationConfidence": saved.get("verificationConfidence"),
             "finalDecision": saved.get("matchStatus"),
-            "qwenResponse": {"detection": detection, "verification": verification},
-            "model": getattr(client, "vision_model", settings.qwen_vision_model),
+            "modelResponse": {"detection": detection, "verification": verification},
+            "model": getattr(client, "vision_model", settings.gemini_model),
             "processingTime": elapsed,
             "usage": usage,
             "error": saved.get("error"),

@@ -13,15 +13,11 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_image_bytes: int = 8_000_000
     max_inventory_images: int = 5
-    qwen_api_key: str = ""
-    qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    qwen_vision_model: str = "qwen-vl-plus"
-    qwen_embedding_model: str = "multimodal-embedding-v1"
-    qwen_embedding_url: str = (
-        "https://dashscope-intl.aliyuncs.com/api/v1/services/embeddings/"
-        "multimodal-embedding/multimodal-embedding"
-    )
-    qwen_timeout_seconds: float = 60
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_model: str = "gemini-2.0-flash-lite"
+    gemini_embedding_model: str = "gemini-embedding-2"
+    gemini_timeout_seconds: float = 60
     exact_threshold: float = 0.90
     similar_threshold: float = 0.75
     detection_min_confidence: float = 0.45

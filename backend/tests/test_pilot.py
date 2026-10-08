@@ -4,7 +4,7 @@ import time
 import zlib
 
 from app.services.errors import AIServiceError
-from app.services.qwen import set_qwen_client
+from app.services.gemini import set_gemini_client
 
 
 def tiny_png(red: int, green: int, blue: int) -> bytes:
@@ -20,7 +20,7 @@ def tiny_png(red: int, green: int, blue: int) -> bytes:
     )
 
 
-class FakeQwen:
+class FakeGemini:
     vision_model = "fake-vision"
     embedding_model = "fake-embed"
 
@@ -59,7 +59,7 @@ class FakeQwen:
         name = detection.get("detectedObject")
         if name in self.fail_names:
             self.fail_names.remove(name)
-            raise AIServiceError("Qwen request timed out", "timeout")
+            raise AIServiceError("Gemini request timed out", "timeout")
         verdict = self.verdicts.get(detection.get("detectedObject"))
         if verdict is None:
             verdict = {"decision": "NO_MATCH", "inventoryId": None, "confidence": 0.2, "reason": "No candidate fits."}
@@ -80,7 +80,7 @@ def detection(name: str, confidence: float = 0.96, usable: bool = True) -> dict:
     }
 
 
-def remember(fake: FakeQwen, image: bytes, vector=None, detected=None) -> None:
+def remember(fake: FakeGemini, image: bytes, vector=None, detected=None) -> None:
     digest = hashlib.sha256(image).hexdigest()
     if vector is not None:
         fake.vectors[digest] = vector
@@ -119,8 +119,8 @@ def wait_job(client, job_id: str) -> dict:
 
 
 def test_pilot_matching_pipeline(client):
-    fake = FakeQwen()
-    set_qwen_client(fake)
+    fake = FakeGemini()
+    set_gemini_client(fake)
     try:
         anchor = client.post("/api/inventory", json={"name": "Anchor", "category": "Prop", "subcategory": "Nautical"}).json()
         rope = client.post("/api/inventory", json={"name": "Rope", "category": "Prop"}).json()
@@ -232,4 +232,4 @@ def test_pilot_matching_pipeline(client):
         assert rejected.json()["matchStatus"] == "MISSING"
         assert client.get("/api/inventory").json()["total"] == 3
     finally:
-        set_qwen_client(None)
+        set_gemini_client(None)

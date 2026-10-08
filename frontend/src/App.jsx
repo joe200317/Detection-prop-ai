@@ -19,7 +19,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Qwen vision</p>
+          <p className="eyebrow">Gemini vision</p>
           <h1>Prop inventory</h1>
         </div>
         <nav className="nav">

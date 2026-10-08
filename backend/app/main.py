@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     app.state.db = None
 
 
-app = FastAPI(title="Qwen Inventory", lifespan=lifespan)
+app = FastAPI(title="Prop Inventory", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
