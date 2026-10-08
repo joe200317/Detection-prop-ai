@@ -13,3 +13,4 @@ The React Compiler is not enabled on this template because of its impact on dev 
 
 ## Expanding the Oxlint configuration
 
+gfjf6ig
