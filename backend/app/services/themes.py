@@ -8,7 +8,7 @@ from pymongo.errors import DuplicateKeyError
 from app.config import settings
 from app.services.errors import NotFoundError, RequestError
 from app.services.ids import next_id
-from app.services.gemini import get_gemini_client
+from app.services.nova import get_nova_client
 from app.services.storage import delete_stored, save_image, sha256_bytes
 
 DONE_STATUSES = {"EXACT", "SIMILAR", "MISSING", "NOT_DETECTED", "NEEDS_REVIEW", "AI_FAILED"}
@@ -17,6 +17,14 @@ LINK_STATUSES = {"EXACT", "SIMILAR", "NEEDS_REVIEW"}
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def availability_for(match_status: str | None, inventory_id: str | None) -> str:
+    if match_status in {"PENDING", "PROCESSING"}:
+        return "checking"
+    if inventory_id and match_status in {"EXACT", "SIMILAR", "NEEDS_REVIEW"}:
+        return "available"
+    return "unavailable"
 
 
 def empty_progress() -> dict[str, int]:
@@ -90,6 +98,60 @@ async def set_main_image(
         delete_stored(theme["mainImage"])
     image_url = save_image(data, f"themes/{theme_id}", content_type)
     return await update_theme(db, theme_id, {"mainImage": image_url})
+
+
+async def clear_theme_props(db: AsyncIOMotorDatabase, theme_id: str) -> None:
+    await get_theme(db, theme_id)
+    props = await db.theme_props.find({"themeId": theme_id}).to_list(length=1000)
+    for prop in props:
+        delete_stored(prop.get("sourceImage"))
+    await db.theme_props.delete_many({"themeId": theme_id})
+    await db.theme_items.delete_many({"themeId": theme_id})
+    await refresh_theme_progress(db, theme_id)
+
+
+async def add_scene_prop(
+    db: AsyncIOMotorDatabase,
+    theme_id: str,
+    data: bytes,
+    content_type: str,
+    detection: dict[str, Any],
+    index: int,
+) -> dict[str, Any]:
+    await get_theme(db, theme_id)
+    name = str(detection.get("detectedObject") or f"Prop {index + 1}")
+    image_hash = sha256_bytes(data + f":{index}:{name}".encode())
+    timestamp = now()
+    document = {
+        "propId": await next_id(db, "theme_prop", "PROPIMG"),
+        "themeId": theme_id,
+        "sourceImage": save_image(data, f"themes/{theme_id}/props", content_type),
+        "imageHash": image_hash,
+        "filename": f"{name}.jpg",
+        "contentType": content_type,
+        "detectedObject": name,
+        "detection": detection,
+        "matchStatus": "PENDING",
+        "inventoryItemId": None,
+        "role": detection.get("role") or "prop",
+        "required": True,
+        "detectionConfidence": detection.get("confidence"),
+        "vectorSimilarity": None,
+        "verificationConfidence": None,
+        "finalConfidence": None,
+        "aiReason": None,
+        "candidates": [],
+        "reviewStatus": None,
+        "reviewedBy": None,
+        "reviewedAt": None,
+        "error": None,
+        "source": "theme",
+        "createdAt": timestamp,
+        "updatedAt": timestamp,
+    }
+    await db.theme_props.insert_one(document)
+    await refresh_theme_progress(db, theme_id)
+    return public(document)
 
 
 async def add_prop_image(
@@ -267,6 +329,7 @@ async def theme_result(db: AsyncIOMotorDatabase, theme_id: str) -> dict[str, Any
     rows = []
     for prop in props:
         inventory = items.get(prop.get("inventoryItemId") or "")
+        inventory_status = None if inventory is None else inventory.get("status")
         rows.append(
             {
                 "propId": prop["propId"],
@@ -274,7 +337,8 @@ async def theme_result(db: AsyncIOMotorDatabase, theme_id: str) -> dict[str, Any
                 "sourceImage": prop.get("sourceImage"),
                 "inventoryItemId": prop.get("inventoryItemId"),
                 "inventoryName": None if inventory is None else inventory.get("name"),
-                "inventoryStatus": None if inventory is None else inventory.get("status"),
+                "inventoryStatus": inventory_status,
+                "availability": availability_for(prop.get("matchStatus"), prop.get("inventoryItemId")),
                 "finalConfidence": prop.get("finalConfidence"),
                 "matchStatus": prop.get("matchStatus"),
                 "detectionConfidence": prop.get("detectionConfidence"),
@@ -304,9 +368,9 @@ async def add_inventory_image(
     image_hash = sha256_bytes(data)
     embedding = None
     warning = None
-    client = get_gemini_client()
+    client = get_nova_client()
     try:
-        embedding, _usage = await embed_with_cache(db, data, content_type, client)
+        embedding, _usage = await embed_with_cache(db, data, content_type, client, purpose="GENERIC_INDEX")
     except Exception as exc:
         warning = str(exc)
     timestamp = now()
@@ -353,7 +417,14 @@ async def delete_inventory_image(db: AsyncIOMotorDatabase, inventory_id: str, im
     delete_stored(document.get("imageUrl"))
 
 
-async def embed_with_cache(db: AsyncIOMotorDatabase, data: bytes, content_type: str, client) -> tuple[list[float], bool]:
+async def embed_with_cache(
+    db: AsyncIOMotorDatabase,
+    data: bytes,
+    content_type: str,
+    client,
+    *,
+    purpose: str = "GENERIC_INDEX",
+) -> tuple[list[float], bool]:
     from app.services.matching import cached_embedding
 
-    return await cached_embedding(db, data, content_type, client)
+    return await cached_embedding(db, data, content_type, client, purpose=purpose)

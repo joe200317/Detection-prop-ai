@@ -4,7 +4,7 @@ import time
 import zlib
 
 from app.services.errors import AIServiceError
-from app.services.gemini import set_gemini_client
+from app.services.nova import set_nova_client
 
 
 def tiny_png(red: int, green: int, blue: int) -> bytes:
@@ -20,7 +20,7 @@ def tiny_png(red: int, green: int, blue: int) -> bytes:
     )
 
 
-class FakeGemini:
+class FakeNova:
     vision_model = "fake-vision"
     embedding_model = "fake-embed"
 
@@ -33,10 +33,18 @@ class FakeGemini:
         self.vectors = {}
         self.verdicts = {}
         self.fail_names = set()
+        self.discover_props = []
+        self.identify_queue = []
+        self.embed_queue = []
+
+    async def discover(self, image, content_type):
+        return [dict(item) for item in self.discover_props], {}
 
     async def identify(self, image, content_type, **_kwargs):
         self.identify_calls += 1
         detected = self.detections.get(hashlib.sha256(image).hexdigest())
+        if detected is None and self.identify_queue:
+            detected = self.identify_queue.pop(0)
         if detected is None:
             detected = {
                 "detectedObject": "",
@@ -46,9 +54,11 @@ class FakeGemini:
             }
         return detected, {"image_count": 1}
 
-    async def embed(self, image, content_type):
+    async def embed(self, image, content_type, *, purpose="GENERIC_INDEX"):
         self.embed_calls += 1
         vector = self.vectors.get(hashlib.sha256(image).hexdigest())
+        if vector is None and self.embed_queue:
+            vector = self.embed_queue.pop(0)
         if vector is None:
             raise AIServiceError("Embedding generation failed", "embedding")
         return list(vector), {"image_count": 1}
@@ -59,7 +69,7 @@ class FakeGemini:
         name = detection.get("detectedObject")
         if name in self.fail_names:
             self.fail_names.remove(name)
-            raise AIServiceError("Gemini request timed out", "timeout")
+            raise AIServiceError("Nova request timed out", "timeout")
         verdict = self.verdicts.get(detection.get("detectedObject"))
         if verdict is None:
             verdict = {"decision": "NO_MATCH", "inventoryId": None, "confidence": 0.2, "reason": "No candidate fits."}
@@ -80,7 +90,7 @@ def detection(name: str, confidence: float = 0.96, usable: bool = True) -> dict:
     }
 
 
-def remember(fake: FakeGemini, image: bytes, vector=None, detected=None) -> None:
+def remember(fake: FakeNova, image: bytes, vector=None, detected=None) -> None:
     digest = hashlib.sha256(image).hexdigest()
     if vector is not None:
         fake.vectors[digest] = vector
@@ -119,8 +129,8 @@ def wait_job(client, job_id: str) -> dict:
 
 
 def test_pilot_matching_pipeline(client):
-    fake = FakeGemini()
-    set_gemini_client(fake)
+    fake = FakeNova()
+    set_nova_client(fake)
     try:
         anchor = client.post("/api/inventory", json={"name": "Anchor", "category": "Prop", "subcategory": "Nautical"}).json()
         rope = client.post("/api/inventory", json={"name": "Rope", "category": "Prop"}).json()
@@ -232,4 +242,55 @@ def test_pilot_matching_pipeline(client):
         assert rejected.json()["matchStatus"] == "MISSING"
         assert client.get("/api/inventory").json()["total"] == 3
     finally:
-        set_gemini_client(None)
+        set_nova_client(None)
+
+
+def theme_photo() -> bytes:
+    import io
+
+    from PIL import Image
+
+    image = Image.new("RGB", (32, 32))
+    for x in range(32):
+        color = (180, 20, 20) if x < 16 else (20, 140, 40)
+        for y in range(32):
+            image.putpixel((x, y), color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_theme_photo_checks_inventory(client):
+    fake = FakeNova()
+    set_nova_client(fake)
+    try:
+        anchor = client.post("/api/inventory", json={"name": "Anchor", "category": "Prop"}).json()
+        rope = client.post("/api/inventory", json={"name": "Rope", "category": "Prop", "status": "reserved"}).json()
+        upload_reference(client, fake, anchor["inventoryId"], tiny_png(1, 0, 0), [1, 0, 0])
+        upload_reference(client, fake, rope["inventoryId"], tiny_png(0, 1, 0), [0, 1, 0])
+        fake.discover_props = [
+            {**detection("Anchor"), "box": {"x": 0, "y": 0, "width": 0.5, "height": 1}},
+            {**detection("Rope"), "box": {"x": 0.5, "y": 0, "width": 0.5, "height": 1}},
+        ]
+        fake.identify_queue = [detection("Anchor"), detection("Rope")]
+        fake.embed_queue = [[0.99, 0.02, 0], [0.02, 0.99, 0]]
+        fake.verdicts["Anchor"] = {"decision": "EXACT", "inventoryId": anchor["inventoryId"], "confidence": 0.95, "reason": "Same anchor."}
+        fake.verdicts["Rope"] = {"decision": "EXACT", "inventoryId": rope["inventoryId"], "confidence": 0.94, "reason": "Same rope."}
+
+        theme = client.post("/api/themes", json={"name": "Sailor Theme"}).json()
+        uploaded = client.post(
+            f"/api/themes/{theme['themeId']}/main-image",
+            files={"file": ("theme.png", theme_photo(), "image/png")},
+        )
+        assert uploaded.status_code == 200
+        started = client.post(f"/api/themes/{theme['themeId']}/scan")
+        assert started.status_code == 202, started.text
+        job = wait_job(client, started.json()["jobId"])
+        assert job["status"] == "completed", job
+        rows = {row["detectedObject"]: row for row in client.get(f"/api/themes/{theme['themeId']}/result").json()["rows"]}
+        assert rows["Anchor"]["availability"] == "available"
+        assert rows["Anchor"]["inventoryItemId"] == anchor["inventoryId"]
+        assert rows["Rope"]["availability"] == "available"
+        assert rows["Rope"]["inventoryItemId"] == rope["inventoryId"]
+    finally:
+        set_nova_client(None)

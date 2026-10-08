@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,11 +14,25 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_image_bytes: int = 8_000_000
     max_inventory_images: int = 5
-    gemini_api_key: str = ""
-    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_model: str = "gemini-2.0-flash-lite"
-    gemini_embedding_model: str = "gemini-embedding-2"
-    gemini_timeout_seconds: float = 60
+    aws_region: str = "us-east-1"
+    aws_bearer_token_bedrock: str = ""
+    nova_model_id: str = "us.amazon.nova-lite-v1:0"
+    nova_embedding_model_id: str = "amazon.nova-2-multimodal-embeddings-v1:0"
+    nova_embedding_dimension: int = 1024
+    nova_timeout_seconds: float = 60
+
+    @field_validator(
+        "aws_region",
+        "aws_bearer_token_bedrock",
+        "nova_model_id",
+        "nova_embedding_model_id",
+        mode="before",
+    )
+    @classmethod
+    def _strip_text(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
     exact_threshold: float = 0.90
     similar_threshold: float = 0.75
     detection_min_confidence: float = 0.45

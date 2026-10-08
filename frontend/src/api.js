@@ -120,6 +120,10 @@ export function uploadProp(themeId, file) {
   return requestForm(`/api/themes/${themeId}/props`, body);
 }
 
+export function scanTheme(themeId) {
+  return request(`/api/themes/${themeId}/scan`, { method: "POST" });
+}
+
 export function analyzeTheme(themeId) {
   return request(`/api/themes/${themeId}/analyze`, { method: "POST" });
 }

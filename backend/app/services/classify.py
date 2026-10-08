@@ -1,6 +1,43 @@
+import re
 from typing import Any
 
 from app.config import settings
+
+_NAME_WORDS = {"the", "a", "an", "prop", "item", "and"}
+
+
+def _name_words(value: str) -> set[str]:
+    return {word for word in re.findall(r"[a-z0-9]+", value.lower()) if word not in _NAME_WORDS}
+
+
+def names_agree(detected: str, inventory_name: str) -> bool:
+    left = _name_words(detected)
+    right = _name_words(inventory_name)
+    if not left or not right:
+        return True
+    return bool(left & right)
+
+
+def align_verification(
+    detection: dict[str, Any],
+    verification: dict[str, Any] | None,
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not verification:
+        return verification
+    inventory_id = verification.get("inventoryId")
+    if not inventory_id:
+        return verification
+    names = {candidate["inventoryId"]: str(candidate.get("name") or "") for candidate in candidates}
+    detected = str(detection.get("detectedObject") or "")
+    if names_agree(detected, names.get(str(inventory_id), "")):
+        return verification
+    return {
+        "decision": "NO_MATCH",
+        "inventoryId": None,
+        "confidence": verification.get("confidence") or 0,
+        "reason": f"{detected} is not in inventory.",
+    }
 
 
 def _number(value: Any) -> float | None:
@@ -49,6 +86,22 @@ def classify(
         ver_id = None
 
     if best is None or vector is None or vector < settings.similar_threshold:
+        if (
+            best is not None
+            and ver_decision == "EXACT"
+            and ver_id == best["inventoryId"]
+            and ver_confidence is not None
+            and ver_confidence >= settings.exact_threshold
+        ):
+            return _decision(
+                "EXACT",
+                ver_id,
+                detection_confidence,
+                vector,
+                ver_confidence,
+                ver_confidence,
+                ver_reason or "The prop matches the inventory item.",
+            )
         if ver_decision == "EXACT" and ver_confidence is not None and ver_confidence >= settings.similar_threshold:
             return _decision(
                 "NEEDS_REVIEW",
@@ -57,7 +110,7 @@ def classify(
                 vector,
                 ver_confidence,
                 min(vector or 0, ver_confidence),
-                "Vector search and Gemini verification disagree.",
+                "Vector search and Nova verification disagree.",
             )
         return _decision(
             "MISSING",
@@ -82,7 +135,7 @@ def classify(
         )
 
     if ver_confidence is not None and ver_confidence < settings.similar_threshold:
-        return uncertain("Vector similarity and Gemini verification do not both support an exact match.")
+        return uncertain("Vector similarity and Nova verification do not both support an exact match.")
 
     agreed_exact = (
         ver_decision == "EXACT"
@@ -104,7 +157,7 @@ def classify(
         )
 
     if ver_decision == "NO_MATCH":
-        return uncertain("Vector search and Gemini verification disagree.")
+        return uncertain("Vector search and Nova verification disagree.")
     if close:
         return uncertain("Multiple inventory candidates are too close to choose safely.")
     if ver_decision == "EXACT" and (ver_confidence is None or ver_confidence < settings.exact_threshold or vector < settings.exact_threshold):

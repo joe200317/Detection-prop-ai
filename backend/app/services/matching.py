@@ -5,9 +5,9 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.config import settings
-from app.services.classify import classify
+from app.services.classify import align_verification, classify
 from app.services.errors import AIServiceError
-from app.services.gemini import get_gemini_client
+from app.services.nova import get_nova_client
 from app.services.storage import read_stored, sha256_bytes
 from app.services.themes import get_theme, now, save_prop_result
 from app.services.vector_search import search_inventory_images
@@ -36,13 +36,47 @@ async def store_cache(
     )
 
 
-async def cached_embedding(db: AsyncIOMotorDatabase, data: bytes, content_type: str, client) -> tuple[list[float], bool]:
+async def ensure_inventory_embeddings(db: AsyncIOMotorDatabase, client) -> None:
+    cursor = db.inventory_images.find({}, {"_id": 0, "imageId": 1, "imageUrl": 1, "embedding": 1, "metadata": 1})
+    async for image in cursor:
+        vector = image.get("embedding")
+        if isinstance(vector, list) and vector:
+            continue
+        image_url = image.get("imageUrl") or ""
+        try:
+            data = read_stored(image_url)
+        except AIServiceError:
+            continue
+        content_type = (image.get("metadata") or {}).get("contentType") or content_type_for(image_url)
+        try:
+            embedded, _cached = await cached_embedding(db, data, content_type, client, purpose="GENERIC_INDEX")
+        except AIServiceError as exc:
+            await db.inventory_images.update_one(
+                {"imageId": image["imageId"]},
+                {"$set": {"metadata.embeddingError": str(exc), "updatedAt": now()}},
+            )
+            continue
+        await db.inventory_images.update_one(
+            {"imageId": image["imageId"]},
+            {"$set": {"embedding": embedded, "metadata.embeddingError": None, "updatedAt": now()}},
+        )
+
+
+async def cached_embedding(
+    db: AsyncIOMotorDatabase,
+    data: bytes,
+    content_type: str,
+    client,
+    *,
+    purpose: str = "GENERIC_INDEX",
+) -> tuple[list[float], bool]:
     image_hash = sha256_bytes(data)
-    cached = await cached_value(db, image_hash, "embedding", client.embedding_model)
+    cache_model = f"{client.embedding_model}:{purpose}"
+    cached = await cached_value(db, image_hash, "embedding", cache_model)
     if cached and isinstance(cached.get("result"), list):
         return cached["result"], True
-    vector, _usage = await client.embed(data, content_type)
-    await store_cache(db, image_hash, "embedding", client.embedding_model, vector)
+    vector, _usage = await client.embed(data, content_type, purpose=purpose)
+    await store_cache(db, image_hash, "embedding", cache_model, vector)
     return vector, False
 
 
@@ -59,7 +93,7 @@ def content_type_for(url: str, fallback: str = "image/jpeg") -> str:
 
 async def process_prop(db: AsyncIOMotorDatabase, prop: dict[str, Any], *, use_cache: bool = True) -> dict[str, Any]:
     started = time.perf_counter()
-    client = get_gemini_client()
+    client = get_nova_client()
     theme = await get_theme(db, prop["themeId"])
     await db.theme_props.update_one(
         {"propId": prop["propId"]},
@@ -73,20 +107,33 @@ async def process_prop(db: AsyncIOMotorDatabase, prop: dict[str, Any], *, use_ca
         image = read_stored(prop["sourceImage"])
         content_type = prop.get("contentType") or content_type_for(prop["sourceImage"])
         image_hash = prop.get("imageHash") or sha256_bytes(image)
-        detection, detection_cached = await _detect(db, client, image, content_type, image_hash, theme, use_cache)
-        usage["detectionCached"] = detection_cached
+        scene_detection = _scene_detection(prop)
+        if scene_detection is not None:
+            detection = scene_detection
+            usage["detectionCached"] = True
+        else:
+            detection, detection_cached = await _detect(db, client, image, content_type, image_hash, theme, use_cache)
+            usage["detectionCached"] = detection_cached
         if not detection.get("usable"):
             decision = classify(detection=detection, candidates=[], verification=None)
         else:
-            embedding, embedding_cached = await cached_embedding(db, image, content_type, client)
+            await ensure_inventory_embeddings(db, client)
+            embedding, embedding_cached = await cached_embedding(
+                db, image, content_type, client, purpose="IMAGE_RETRIEVAL"
+            )
             usage["embeddingCached"] = embedding_cached
             candidates = await search_inventory_images(db, embedding, settings.candidate_limit)
             verification = None
-            strong = [candidate for candidate in candidates if candidate["bestSimilarity"] >= settings.similar_threshold]
-            if strong:
-                verification, verify_usage = await _verify(client, image, content_type, detection, strong)
+            comparable = [
+                candidate
+                for candidate in candidates
+                if candidate["bestSimilarity"] >= settings.detection_min_confidence
+            ]
+            if comparable:
+                verification, verify_usage = await _verify(client, image, content_type, detection, comparable)
                 usage["verification"] = verify_usage
-                candidates = strong
+                candidates = comparable
+            verification = align_verification(detection, verification, candidates)
             decision = classify(detection=detection, candidates=candidates, verification=verification)
         result = {
             "detectedObject": detection.get("detectedObject") or None,
@@ -125,7 +172,7 @@ async def process_prop(db: AsyncIOMotorDatabase, prop: dict[str, Any], *, use_ca
             "verificationConfidence": saved.get("verificationConfidence"),
             "finalDecision": saved.get("matchStatus"),
             "modelResponse": {"detection": detection, "verification": verification},
-            "model": getattr(client, "vision_model", settings.gemini_model),
+            "model": getattr(client, "vision_model", settings.nova_model_id),
             "processingTime": elapsed,
             "usage": usage,
             "error": saved.get("error"),
@@ -133,6 +180,23 @@ async def process_prop(db: AsyncIOMotorDatabase, prop: dict[str, Any], *, use_ca
         }
     )
     return saved
+
+
+def _scene_detection(prop: dict[str, Any]) -> dict[str, Any] | None:
+    if prop.get("source") != "theme" or not isinstance(prop.get("detection"), dict):
+        return None
+    detection = dict(prop["detection"])
+    name = str(detection.get("detectedObject") or "").strip()
+    if not name:
+        return None
+    detection["detectedObject"] = name
+    detection["usable"] = True
+    try:
+        confidence = float(detection.get("confidence") or 0)
+    except (TypeError, ValueError):
+        confidence = 0
+    detection["confidence"] = max(confidence, 0.8)
+    return detection
 
 
 async def _detect(db, client, image, content_type, image_hash, theme, use_cache):
@@ -168,7 +232,14 @@ async def _verify(client, image, content_type, detection, candidates):
             continue
         payload.append((candidate["inventoryId"], data, content_type_for(candidate["bestImageUrl"])))
     if not payload:
-        raise AIServiceError("Candidate images could not be read", "image")
+        best = candidates[0]
+        decision = "EXACT" if float(best.get("bestSimilarity") or 0) >= settings.exact_threshold else "SIMILAR"
+        return {
+            "decision": decision,
+            "inventoryId": best["inventoryId"],
+            "confidence": float(best.get("bestSimilarity") or 0),
+            "reason": "Matched from the saved inventory photo.",
+        }, {}
     return await client.verify(image, content_type, detection, candidates, payload)
 
 

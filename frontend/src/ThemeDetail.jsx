@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { analyzeTheme, getLogs, getResult, getTheme, mediaUrl, retryTheme, uploadMainImage, uploadProp } from "./api";
+import { getLogs, getResult, getTheme, mediaUrl, retryTheme, scanTheme, uploadMainImage } from "./api";
+
+function availabilityLabel(value) {
+  if (value === "available") {
+    return "Available";
+  }
+  if (value === "checking") {
+    return "Checking";
+  }
+  return "Not available";
+}
 
 function percent(value) {
   if (value === null || value === undefined) {
@@ -68,23 +78,6 @@ export default function ThemeDetail({ themeId, onBack }) {
     }
   }
 
-  async function uploadMany(event) {
-    const files = [...(event.target.files || [])];
-    event.target.value = "";
-    setBusy(true);
-    setError("");
-    try {
-      for (const file of files) {
-        await uploadProp(themeId, file);
-      }
-      setReloadKey((value) => value + 1);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function run(action) {
     setBusy(true);
     setError("");
@@ -100,6 +93,8 @@ export default function ThemeDetail({ themeId, onBack }) {
 
   const progress = theme?.progress || {};
   const job = theme?.activeJob;
+  const inInventory = rows.filter((row) => row.availability === "available").length;
+  const notInInventory = rows.filter((row) => row.availability === "unavailable").length;
 
   return (
     <main className="stack">
@@ -115,31 +110,31 @@ export default function ThemeDetail({ themeId, onBack }) {
         </p>
       </div>
       {error && <p className="error">{error}</p>}
+      {!error && job?.status === "failed" && job.error && <p className="error">{job.error}</p>}
 
       <section className="panel theme-tools">
         <div>
-          <p className="section-label">Main theme image</p>
-          {theme?.mainImage && <img className="preview" src={mediaUrl(theme.mainImage)} alt="Main theme" />}
+          <p className="section-label">Theme photo</p>
+          <p className="muted">Upload the theme photo only. Every prop in that photo is checked against inventory.</p>
+          {theme?.mainImage && <img className="preview" src={mediaUrl(theme.mainImage)} alt="Theme" />}
           <label>
-            Upload main image
-            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => uploadOne(event, uploadMainImage)} />
-          </label>
-        </div>
-        <div>
-          <p className="section-label">Individual prop images</p>
-          <label>
-            Upload prop images
-            <input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy} onChange={uploadMany} />
+            Upload theme photo
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              disabled={busy}
+              onChange={(event) => uploadOne(event, async (id, file) => {
+                await uploadMainImage(id, file);
+                await scanTheme(id);
+              })}
+            />
           </label>
           <div className="actions">
-            <button type="button" disabled={busy || !theme?.props?.length} onClick={() => run(() => analyzeTheme(themeId))}>
-              Analyze theme
+            <button type="button" disabled={busy || !theme?.mainImage} onClick={() => run(() => scanTheme(themeId))}>
+              Check inventory
             </button>
             <button type="button" className="secondary" disabled={busy} onClick={() => run(() => retryTheme(themeId, { scope: "failed" }))}>
               Retry failed
-            </button>
-            <button type="button" className="secondary" disabled={busy} onClick={() => run(() => retryTheme(themeId, { scope: "all" }))}>
-              Re-run theme
             </button>
           </div>
         </div>
@@ -147,10 +142,9 @@ export default function ThemeDetail({ themeId, onBack }) {
 
       <section className="panel">
         <div className="counts">
-          <span>Exact {progress.successfulProps || 0}</span>
-          <span>Review {progress.reviewRequired || 0}</span>
-          <span>Missing {progress.missingProps || 0}</span>
-          <span>Failed {progress.failedProps || 0}</span>
+          <span>In inventory {inInventory}</span>
+          <span>Not in inventory {notInInventory}</span>
+          <span>Theme props {progress.totalProps || rows.length}</span>
         </div>
         <div className="table-wrap">
           <table>
@@ -160,25 +154,30 @@ export default function ThemeDetail({ themeId, onBack }) {
                 <th>Inventory</th>
                 <th>Availability</th>
                 <th>Confidence</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.propId}>
                   <td>
-                    <strong>{row.detectedObject || "Unidentified"}</strong>
+                    <div className="prop-name">
+                      {row.sourceImage && <img src={mediaUrl(row.sourceImage)} alt="" />}
+                      <strong>{row.detectedObject || "Unidentified"}</strong>
+                    </div>
                     {row.aiReason && <span className="muted">{row.aiReason}</span>}
                   </td>
                   <td className="id">{row.inventoryItemId ? `${row.inventoryItemId} ${row.inventoryName || ""}` : "—"}</td>
-                  <td>{row.inventoryStatus || "—"}</td>
+                  <td>
+                    <span className={`status ${row.availability === "available" ? "status-EXACT" : row.availability === "checking" ? "status-PENDING" : "status-MISSING"}`}>
+                      {availabilityLabel(row.availability)}
+                    </span>
+                  </td>
                   <td>{percent(row.finalConfidence)}</td>
-                  <td><span className={`status status-${row.matchStatus}`}>{row.matchStatus}</span></td>
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="empty">Upload individual prop images, then analyze.</td>
+                  <td colSpan={4} className="empty">Upload the theme photo. Props in that photo are checked against inventory.</td>
                 </tr>
               )}
             </tbody>

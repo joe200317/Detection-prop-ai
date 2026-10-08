@@ -4,7 +4,7 @@ import tempfile
 os.environ["MONGODB_DB"] = "qwen_inventory_test"
 os.environ["UPLOAD_DIR"] = tempfile.mkdtemp(prefix="qwen-uploads-")
 os.environ["WORKER_POLL_SECONDS"] = "0.05"
-os.environ["GEMINI_API_KEY"] = ""
+os.environ["AWS_BEARER_TOKEN_BEDROCK"] = ""
 
 import pytest
 from fastapi.testclient import TestClient

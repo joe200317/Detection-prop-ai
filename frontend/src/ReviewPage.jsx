@@ -122,7 +122,7 @@ export default function ReviewPage() {
             </div>
             <dl className="facts">
               <div><dt>Vector similarity</dt><dd>{percent(selected.vectorSimilarity)}</dd></div>
-              <div><dt>Gemini confidence</dt><dd>{percent(selected.verificationConfidence)}</dd></div>
+              <div><dt>Nova confidence</dt><dd>{percent(selected.verificationConfidence)}</dd></div>
               <div><dt>Final confidence</dt><dd>{percent(selected.finalConfidence)}</dd></div>
               <div><dt>Availability</dt><dd>{candidate?.status || "—"}</dd></div>
             </dl>

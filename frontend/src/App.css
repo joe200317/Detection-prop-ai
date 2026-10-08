@@ -289,6 +289,21 @@ td strong,
   width: min(280px, 100%);
 }
 
+.prop-name {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.prop-name img {
+  width: 54px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e3d3bc;
+  background: #f6efe4;
+}
+
 .thumbs img,
 .compare img,
 .preview {

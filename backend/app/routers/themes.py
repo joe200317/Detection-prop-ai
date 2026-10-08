@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.deps import get_database
 from app.services.errors import NotFoundError, RequestError
-from app.services.jobs import active_job, enqueue_job, get_job
+from app.services.jobs import enqueue_job, get_job, latest_job
 from app.services.review import apply_review, list_review_items
 from app.services.storage import read_image
 from app.services.themes import (
@@ -50,7 +50,7 @@ class ThemeUpdate(BaseModel):
 
 class RetryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    scope: Literal["failed", "prop", "all"] = "failed"
+    scope: Literal["failed", "prop", "all", "scene"] = "failed"
     propId: str | None = None
 
 
@@ -96,7 +96,7 @@ async def get_one_theme(theme_id: str, request: Request) -> dict:
         theme = await get_theme(db, _theme_or_404(theme_id))
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    theme["activeJob"] = await active_job(db, theme_id)
+    theme["activeJob"] = await latest_job(db, theme_id)
     theme["props"] = await list_props(db, theme_id)
     return theme
 
@@ -142,6 +142,19 @@ async def get_result(theme_id: str, request: Request) -> dict:
         return await theme_result(await get_database(request), _theme_or_404(theme_id))
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api/themes/{theme_id}/scan", status_code=202)
+async def scan_theme(theme_id: str, request: Request) -> dict:
+    db = await get_database(request)
+    try:
+        theme = await get_theme(db, _theme_or_404(theme_id))
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not theme.get("mainImage"):
+        raise HTTPException(status_code=400, detail="Upload a theme image first")
+    job = await enqueue_job(db, theme_id, "scene")
+    return {"jobId": job["jobId"], "status": job["status"]}
 
 
 @router.post("/api/themes/{theme_id}/analyze", status_code=202)

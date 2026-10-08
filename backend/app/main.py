@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +12,7 @@ from app.database import close, ensure_database
 from app.routers.images import router as image_router
 from app.routers.inventory import router as inventory_router
 from app.routers.themes import router as theme_router
+from app.services.storage import upload_root
 from app.worker import job_worker
 
 logging.basicConfig(level=logging.INFO)
@@ -53,8 +53,7 @@ app.add_middleware(
 app.include_router(inventory_router)
 app.include_router(image_router)
 app.include_router(theme_router)
-Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
+app.mount("/uploads", StaticFiles(directory=str(upload_root())), name="uploads")
 
 
 @app.get("/api/health")

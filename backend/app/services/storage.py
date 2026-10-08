@@ -17,6 +17,8 @@ ALLOWED_TYPES = {
 
 def upload_root() -> Path:
     root = Path(settings.upload_dir)
+    if not root.is_absolute():
+        root = Path(__file__).resolve().parents[2] / root
     root.mkdir(parents=True, exist_ok=True)
     return root
 

@@ -1,4 +1,4 @@
-from app.services.classify import classify
+from app.services.classify import align_verification, classify
 from app.services.vector_search import cosine, group_by_inventory
 
 
@@ -31,6 +31,33 @@ def test_high_vector_and_low_verification_needs_review():
     )
     assert decision["matchStatus"] == "NEEDS_REVIEW"
     assert decision["matchStatus"] != "EXACT"
+
+
+def test_different_object_stays_unmatched():
+    verification = align_verification(
+        {"detectedObject": "Gift"},
+        {"decision": "SIMILAR", "inventoryId": "PROP-002", "confidence": 0.7, "reason": "similar shape"},
+        [_candidate("PROP-002", 0.62) | {"name": "Santa hat"}],
+    )
+    assert verification["decision"] == "NO_MATCH"
+    assert verification["inventoryId"] is None
+    decision = classify(
+        detection={"detectedObject": "Gift", "usable": True, "confidence": 0.9},
+        candidates=[_candidate("PROP-002", 0.62) | {"name": "Santa hat"}],
+        verification=verification,
+    )
+    assert decision["matchStatus"] == "MISSING"
+    assert decision["inventoryItemId"] is None
+
+
+def test_nova_exact_matches_when_crop_similarity_is_moderate():
+    decision = classify(
+        detection={"detectedObject": "Santa hat", "usable": True, "confidence": 0.96},
+        candidates=[_candidate("PROP-002", 0.62), _candidate("PROP-001", 0.29)],
+        verification={"decision": "EXACT", "inventoryId": "PROP-002", "confidence": 0.95, "reason": "same hat"},
+    )
+    assert decision["matchStatus"] == "EXACT"
+    assert decision["inventoryItemId"] == "PROP-002"
 
 
 def test_similar_and_missing_and_not_detected():

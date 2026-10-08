@@ -6,6 +6,7 @@ from pymongo import ReturnDocument
 from app.services.errors import NotFoundError, RequestError
 from app.services.ids import next_id
 from app.services.matching import process_prop, props_for_scope
+from app.services.scene import materialize_scene_props
 from app.services.themes import get_prop, get_theme, list_props, now, refresh_theme_progress
 
 
@@ -72,9 +73,17 @@ async def claim_job(db: AsyncIOMotorDatabase) -> dict[str, Any] | None:
     return document
 
 
+async def latest_job(db: AsyncIOMotorDatabase, theme_id: str) -> dict[str, Any] | None:
+    return await db.jobs.find_one({"themeId": theme_id}, {"_id": 0}, sort=[("createdAt", -1)])
+
+
 async def run_job(db: AsyncIOMotorDatabase, job: dict[str, Any]) -> None:
+    scope = job.get("scope") or "pending"
+    if scope == "scene":
+        await materialize_scene_props(db, job["themeId"])
+        scope = "pending"
     props = await list_props(db, job["themeId"])
-    selected = props_for_scope(props, job.get("scope") or "pending", job.get("propId"))
+    selected = props_for_scope(props, scope, job.get("propId"))
     await db.jobs.update_one(
         {"jobId": job["jobId"]},
         {"$set": {"totalProps": len(selected), "updatedAt": now()}},
