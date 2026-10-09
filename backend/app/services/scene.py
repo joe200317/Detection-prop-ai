@@ -10,6 +10,28 @@ from app.services.storage import read_stored
 from app.services.themes import add_scene_prop, clear_theme_props, get_theme
 
 
+def union_box(left: dict[str, float] | None, right: dict[str, float] | None) -> dict[str, float] | None:
+    if not left:
+        return right
+    if not right:
+        return left
+    x = min(left["x"], right["x"])
+    y = min(left["y"], right["y"])
+    right_edge = max(left["x"] + left["width"], right["x"] + right["width"])
+    bottom = max(left["y"] + left["height"], right["y"] + right["height"])
+    return {"x": x, "y": y, "width": right_edge - x, "height": bottom - y}
+
+
+def enclose_box(box: dict[str, float] | None, pad: float = 0.04) -> dict[str, float] | None:
+    if not box:
+        return None
+    x = max(0, box["x"] - pad)
+    y = max(0, box["y"] - pad)
+    right_edge = min(1, box["x"] + box["width"] + pad)
+    bottom = min(1, box["y"] + box["height"] + pad)
+    return {"x": x, "y": y, "width": right_edge - x, "height": bottom - y}
+
+
 def crop_prop(data: bytes, box: dict[str, Any] | None) -> bytes:
     from PIL import Image
 
@@ -36,12 +58,24 @@ async def materialize_scene_props(db: AsyncIOMotorDatabase, theme_id: str) -> li
     except AIServiceError as exc:
         raise AIServiceError("Theme image could not be read. Upload the theme photo again.", "image") from exc
     content_type = content_type_for(theme["mainImage"])
-    detections, _usage = await get_nova_client().discover(data, content_type)
+    client = get_nova_client()
+    detections, _usage = await client.discover(data, content_type)
     if not detections:
         raise AIServiceError("No props were found in the theme image", "not_detected")
     await clear_theme_props(db, theme_id)
     props = []
     for index, detection in enumerate(detections):
+        detection["box"] = await _full_object_box(client, data, content_type, detection)
         crop = crop_prop(data, detection.get("box"))
         props.append(await add_scene_prop(db, theme_id, crop, "image/jpeg", detection, index))
     return props
+
+
+async def _full_object_box(client, data: bytes, content_type: str, detection: dict[str, Any]) -> dict[str, float] | None:
+    original = detection.get("box")
+    refined = None
+    try:
+        refined = await client.refine_box(data, content_type, detection["detectedObject"])
+    except AIServiceError:
+        refined = None
+    return enclose_box(union_box(original if isinstance(original, dict) else None, refined))

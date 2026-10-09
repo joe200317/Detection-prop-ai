@@ -30,9 +30,18 @@ Choose inventoryId only from the candidates listed. Use null when the decision i
 SCENE_PROMPT = """Look at this theme photo and list every distinct physical prop you can see.
 Skip people, plain walls, and empty background.
 Return only JSON with this shape:
-{"props":[{"detectedObject":"","category":"","role":"prop","color":"","material":"","shape":"","visualFeatures":[],"confidence":0.0,"usable":true,"box":{"x":0,"y":0,"width":0,"height":0}}]}
-box x, y, width, and height are fractions from 0 to 1. x and y are the top-left corner.
+{"props":[{"detectedObject":"","category":"","role":"prop","color":"","material":"","shape":"","visualFeatures":[],"confidence":0.0,"usable":true,"box":{"xmin":0,"ymin":0,"xmax":1000,"ymax":1000}}]}
+Box coordinates run from 0 to 1000 across the full photo.
+Each box must cover the entire object, from its leftmost pixel to its rightmost pixel and from its top to its bottom.
+Include parts that stick out, such as a hat brim, tail, and pom-pom. A thin slice is wrong.
 Include one entry per physical item. Do not invent an inventory ID."""
+
+BOX_PROMPT = """Locate the entire "{name}" in this photo.
+Return only JSON: {{"box":{{"xmin":0,"ymin":0,"xmax":1000,"ymax":1000}}}}
+Coordinates run from 0 to 1000 across the full width and the full height.
+The box must contain every pixel of that object, including parts that stick out.
+For a hat, include the crown, brim, tail, and pom-pom. Do not return only one edge.
+Including a little background is acceptable. Cutting off part of the object is not."""
 
 _IMAGE_FORMATS = {
     "image/jpeg": "jpeg",
@@ -126,14 +135,25 @@ def _box(value: Any) -> dict[str, float] | None:
     if not isinstance(value, dict):
         return None
     try:
-        x = float(value.get("x"))
-        y = float(value.get("y"))
-        width = float(value.get("width") if value.get("width") is not None else value.get("w"))
-        height = float(value.get("height") if value.get("height") is not None else value.get("h"))
+        if any(key in value for key in ("xmin", "xmax", "ymin", "ymax")):
+            xmin = float(value.get("xmin") or 0)
+            ymin = float(value.get("ymin") or 0)
+            xmax = float(value.get("xmax") or 0)
+            ymax = float(value.get("ymax") or 0)
+            scale = 1000 if max(xmin, ymin, xmax, ymax) > 1.5 else 1
+            x = xmin / scale
+            y = ymin / scale
+            width = (xmax - xmin) / scale
+            height = (ymax - ymin) / scale
+        else:
+            x = float(value.get("x"))
+            y = float(value.get("y"))
+            width = float(value.get("width") if value.get("width") is not None else value.get("w"))
+            height = float(value.get("height") if value.get("height") is not None else value.get("h"))
+            if max(x, y, width, height) > 1:
+                x, y, width, height = x / 100, y / 100, width / 100, height / 100
     except (TypeError, ValueError):
         return None
-    if max(x, y, width, height) > 1:
-        x, y, width, height = x / 100, y / 100, width / 100, height / 100
     x = min(max(x, 0), 1)
     y = min(max(y, 0), 1)
     width = min(max(width, 0), 1)
@@ -240,6 +260,14 @@ class NovaClient:
             max_tokens=2048,
         )
         return normalize_scene(parse_model_json(text)), usage
+
+    async def refine_box(self, image: bytes, content_type: str, name: str) -> dict[str, float] | None:
+        text, _usage = await self._converse(
+            [_image_block(image, content_type), {"text": BOX_PROMPT.format(name=name)}],
+            max_tokens=300,
+        )
+        payload = parse_model_json(text)
+        return _box(payload.get("box") if isinstance(payload.get("box"), dict) else payload)
 
     async def identify(
         self,

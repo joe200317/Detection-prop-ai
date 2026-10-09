@@ -1,9 +1,13 @@
+from pathlib import Path
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=str(_ENV_FILE), env_ignore_empty=True, extra="ignore")
 
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_db: str = "qwen_inventory"

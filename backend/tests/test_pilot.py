@@ -40,6 +40,12 @@ class FakeNova:
     async def discover(self, image, content_type):
         return [dict(item) for item in self.discover_props], {}
 
+    async def refine_box(self, image, content_type, name):
+        for item in self.discover_props:
+            if item.get("detectedObject") == name and isinstance(item.get("box"), dict):
+                return dict(item["box"])
+        return None
+
     async def identify(self, image, content_type, **_kwargs):
         self.identify_calls += 1
         detected = self.detections.get(hashlib.sha256(image).hexdigest())

@@ -1,4 +1,6 @@
 from app.services.classify import align_verification, classify
+from app.services.nova import _box
+from app.services.scene import enclose_box, union_box
 from app.services.vector_search import cosine, group_by_inventory
 
 
@@ -31,6 +33,18 @@ def test_high_vector_and_low_verification_needs_review():
     )
     assert decision["matchStatus"] == "NEEDS_REVIEW"
     assert decision["matchStatus"] != "EXACT"
+
+
+def test_box_covers_full_object_extent():
+    box = _box({"xmin": 100, "ymin": 50, "xmax": 700, "ymax": 450})
+    assert box == {"x": 0.1, "y": 0.05, "width": 0.6, "height": 0.4}
+    sliver = {"x": 0.02, "y": 0.1, "width": 0.05, "height": 0.4}
+    full = union_box(sliver, box)
+    covered = enclose_box(full, pad=0.04)
+    assert covered["x"] <= 0.1
+    assert covered["y"] <= 0.05
+    assert covered["x"] + covered["width"] >= 0.7
+    assert covered["y"] + covered["height"] >= 0.45
 
 
 def test_different_object_stays_unmatched():
