@@ -35,6 +35,21 @@ def test_high_vector_and_low_verification_needs_review():
     assert decision["matchStatus"] != "EXACT"
 
 
+def test_scene_keeps_named_props_even_when_marked_unusable():
+    from app.services.nova import normalize_scene
+
+    found = normalize_scene(
+        {
+            "objects": [
+                {"name": "Santa hat", "usable": False, "confidence": 0.2},
+                {"label": "Gift"},
+            ]
+        }
+    )
+    assert [item["detectedObject"] for item in found] == ["Santa hat", "Gift"]
+    assert all(item["usable"] for item in found)
+
+
 def test_parse_model_json_accepts_wrapped_and_truncated_lists():
     wrapped = parse_model_json('Here is the result:\n```json\n{"props":[{"detectedObject":"Santa hat"}]}\n```')
     assert wrapped["props"][0]["detectedObject"] == "Santa hat"

@@ -27,8 +27,9 @@ SIMILAR means the same kind of object but it is not confirmed.
 NO_MATCH means it is a different object. A gift is not a Santa hat. Similar color or shape is not enough.
 Choose inventoryId only from the candidates listed. Use null when the decision is NO_MATCH."""
 
-SCENE_PROMPT = """Look at this theme photo and list every distinct physical prop you can see.
-Skip people, plain walls, and empty background.
+SCENE_PROMPT = """List every physical prop in this photo, including objects a person is wearing.
+A hat, clothing, gift, tree, and decoration all count. Skip only the person's face and plain empty walls.
+Do not return an empty list when any object is visible. Set usable to true for every object you can name.
 Return only JSON with this shape:
 {"props":[{"detectedObject":"","category":"","role":"prop","color":"","material":"","shape":"","visualFeatures":[],"confidence":0.0,"usable":true,"box":{"xmin":0,"ymin":0,"xmax":1000,"ymax":1000}}]}
 Box coordinates run from 0 to 1000 across the full photo.
@@ -206,20 +207,45 @@ def _box(value: Any) -> dict[str, float] | None:
     return {"x": x, "y": y, "width": width, "height": height}
 
 
+def _prop_name(item: dict[str, Any]) -> str:
+    for key in ("detectedObject", "name", "object", "label", "item", "prop"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _prop_list(payload: dict[str, Any]) -> list[Any] | None:
+    for key in ("props", "objects", "items", "detections"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    for value in payload.values():
+        if isinstance(value, list) and value and all(isinstance(entry, dict) for entry in value):
+            return value
+    if _prop_name(payload):
+        return [payload]
+    return None
+
+
 def normalize_scene(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    props = payload.get("props")
-    if props is None and payload.get("detectedObject"):
-        props = [payload]
-    if not isinstance(props, list):
+    props = _prop_list(payload)
+    if props is None:
         raise AIServiceError("Nova returned invalid JSON", "invalid_json")
     found: list[dict[str, Any]] = []
     for item in props:
         if not isinstance(item, dict):
             continue
-        detection = normalize_detection(item)
-        if not detection["usable"] or not detection["detectedObject"]:
+        named = dict(item)
+        name = _prop_name(named)
+        if not name:
             continue
-        detection["box"] = _box(item.get("box"))
+        named["detectedObject"] = name
+        detection = normalize_detection(named)
+        detection["detectedObject"] = name
+        detection["usable"] = True
+        box = named.get("box") or named.get("boundingBox") or named.get("bbox")
+        detection["box"] = _box(box) if isinstance(box, dict) else None
         found.append(detection)
         if len(found) >= 12:
             break
@@ -297,6 +323,23 @@ class NovaClient:
         text, usage = await self._converse(
             [_image_block(image, content_type), {"text": SCENE_PROMPT}],
             max_tokens=4096,
+        )
+        found = normalize_scene(parse_model_json(text))
+        if found:
+            return found, usage
+        text, usage = await self._converse(
+            [
+                _image_block(image, content_type),
+                {
+                    "text": (
+                        "Name every object you can see, including a hat or clothes worn by a person. "
+                        'Return only JSON {"props":[{"detectedObject":"","usable":true,'
+                        '"box":{"xmin":0,"ymin":0,"xmax":1000,"ymax":1000}}]}. '
+                        "Do not return an empty list."
+                    )
+                },
+            ],
+            max_tokens=2048,
         )
         return normalize_scene(parse_model_json(text)), usage
 
