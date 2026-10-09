@@ -52,17 +52,56 @@ _IMAGE_FORMATS = {
 }
 
 
+def _as_object(parsed: Any) -> dict[str, Any] | None:
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        return {"props": parsed}
+    return None
+
+
+def _loads(text: str) -> dict[str, Any] | None:
+    try:
+        return _as_object(json.loads(text))
+    except json.JSONDecodeError:
+        return None
+
+
+def _repair_json(text: str) -> dict[str, Any] | None:
+    start = text.find("{")
+    if start < 0:
+        start = text.find("[")
+    if start < 0:
+        return None
+    chunk = text[start:]
+    last_brace = max(chunk.rfind("}"), chunk.rfind("]"))
+    if last_brace >= 0:
+        chunk = chunk[: last_brace + 1]
+    chunk = re.sub(r",\s*([}\]])", r"\1", chunk)
+    extra_brackets = chunk.count("[") - chunk.count("]")
+    extra_braces = chunk.count("{") - chunk.count("}")
+    if extra_brackets > 0:
+        chunk += "]" * extra_brackets
+    if extra_braces > 0:
+        chunk += "}" * extra_braces
+    return _loads(chunk)
+
+
 def parse_model_json(text: str) -> dict[str, Any]:
     cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
-        cleaned = re.sub(r"```$", "", cleaned).strip()
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise AIServiceError("Nova returned invalid JSON", "invalid_json") from exc
-    if not isinstance(parsed, dict):
-        raise AIServiceError("Nova returned invalid JSON", "invalid_json")
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    parsed = _loads(cleaned)
+    if parsed is None:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            parsed = _loads(cleaned[start : end + 1])
+    if parsed is None:
+        parsed = _repair_json(cleaned)
+    if parsed is None:
+        preview = " ".join(cleaned.split())[:180]
+        raise AIServiceError(f"Nova returned invalid JSON: {preview}", "invalid_json")
     return parsed
 
 
@@ -257,7 +296,7 @@ class NovaClient:
     async def discover(self, image: bytes, content_type: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         text, usage = await self._converse(
             [_image_block(image, content_type), {"text": SCENE_PROMPT}],
-            max_tokens=2048,
+            max_tokens=4096,
         )
         return normalize_scene(parse_model_json(text)), usage
 

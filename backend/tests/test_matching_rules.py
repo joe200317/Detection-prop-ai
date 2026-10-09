@@ -1,5 +1,5 @@
 from app.services.classify import align_verification, classify
-from app.services.nova import _box
+from app.services.nova import _box, parse_model_json
 from app.services.scene import enclose_box, union_box
 from app.services.vector_search import cosine, group_by_inventory
 
@@ -33,6 +33,15 @@ def test_high_vector_and_low_verification_needs_review():
     )
     assert decision["matchStatus"] == "NEEDS_REVIEW"
     assert decision["matchStatus"] != "EXACT"
+
+
+def test_parse_model_json_accepts_wrapped_and_truncated_lists():
+    wrapped = parse_model_json('Here is the result:\n```json\n{"props":[{"detectedObject":"Santa hat"}]}\n```')
+    assert wrapped["props"][0]["detectedObject"] == "Santa hat"
+    listed = parse_model_json('[{"detectedObject":"Gift"}]')
+    assert listed["props"][0]["detectedObject"] == "Gift"
+    truncated = parse_model_json('{"props":[{"detectedObject":"Santa hat"},{"detectedObject":"Gift"')
+    assert [item["detectedObject"] for item in truncated["props"]] == ["Santa hat"]
 
 
 def test_box_covers_full_object_extent():
