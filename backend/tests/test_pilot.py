@@ -209,12 +209,13 @@ def test_pilot_matching_pipeline(client):
         assert by_name["Pirate Chest"][0]["matchStatus"] == "MISSING"
         assert by_name["Pirate Chest"][0]["inventoryItemId"] is None
         assert any(row["matchStatus"] == "NOT_DETECTED" for row in result["rows"])
-        assert by_prop[second_anchor["propId"]]["matchStatus"] == "NEEDS_REVIEW"
+        assert by_prop[second_anchor["propId"]]["matchStatus"] == "EXACT"
+        assert by_prop[second_anchor["propId"]]["inventoryItemId"] == "PROP-001"
         anchor_row = by_name["Anchor"][0]
         assert anchor_row["candidates"][0]["bestImageId"] == front["imageId"]
 
         links = result["theme"]["progress"]
-        assert links["successfulProps"] == 2
+        assert links["successfulProps"] == 3
         assert links["missingProps"] == 1
         assert links["failedProps"] == 0
         assert client.get("/api/inventory").json()["total"] == 3

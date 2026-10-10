@@ -4,7 +4,7 @@ import time
 from datetime import timezone
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
+from pymongo.errors import OperationFailure, PyMongoError, ServerSelectionTimeoutError
 
 from app.config import settings
 
@@ -62,6 +62,17 @@ async def close() -> None:
     database = None
 
 
+async def _allow_duplicate_theme_links(db: AsyncIOMotorDatabase) -> None:
+    """Drop the old one-item-per-theme unique index so the same product can match more than once."""
+    try:
+        info = await db.theme_items.index_information()
+    except OperationFailure:
+        return
+    old = info.get("themeId_1_inventoryItemId_1")
+    if old and old.get("unique"):
+        await db.theme_items.drop_index("themeId_1_inventoryItemId_1")
+
+
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.inventory_items.create_index("inventoryId", unique=True)
     await db.inventory_items.create_index("status")
@@ -74,7 +85,9 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.theme_props.create_index("propId", unique=True)
     await db.theme_props.create_index([("themeId", 1), ("imageHash", 1)], unique=True)
     await db.theme_props.create_index([("themeId", 1), ("matchStatus", 1)])
-    await db.theme_items.create_index([("themeId", 1), ("inventoryItemId", 1)], unique=True)
+    await _allow_duplicate_theme_links(db)
+    await db.theme_items.create_index([("themeId", 1), ("inventoryItemId", 1)])
+    await db.theme_items.create_index([("themeId", 1), ("propId", 1)], unique=True)
     await db.theme_items.create_index("propId")
     await db.ai_match_logs.create_index("requestId", unique=True)
     await db.ai_match_logs.create_index([("themeId", 1), ("createdAt", -1)])

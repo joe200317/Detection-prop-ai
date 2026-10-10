@@ -3,7 +3,6 @@ from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
-from pymongo.errors import DuplicateKeyError
 
 from app.config import settings
 from app.services.errors import NotFoundError, RequestError
@@ -270,27 +269,6 @@ async def sync_theme_link(db: AsyncIOMotorDatabase, prop: dict[str, Any]) -> Non
     inventory_id = prop.get("inventoryItemId")
     status = prop.get("matchStatus")
     if status in LINK_STATUSES and inventory_id:
-        existing = await db.theme_items.find_one(
-            {"themeId": theme_id, "inventoryItemId": inventory_id},
-            {"_id": 0},
-        )
-        if existing and existing.get("propId") != prop_id:
-            await db.theme_props.update_one(
-                {"propId": prop_id},
-                {
-                    "$set": {
-                        "matchStatus": "NEEDS_REVIEW",
-                        "inventoryItemId": None,
-                        "aiReason": (
-                            f"{inventory_id} is already linked to this theme by {existing.get('propId')}. "
-                            "Choose a different item or reject the duplicate."
-                        ),
-                        "updatedAt": now(),
-                    }
-                },
-            )
-            await db.theme_items.delete_many({"themeId": theme_id, "propId": prop_id})
-            return
         timestamp = now()
         link = {
             "themeId": theme_id,
@@ -310,19 +288,10 @@ async def sync_theme_link(db: AsyncIOMotorDatabase, prop: dict[str, Any]) -> Non
             "reviewedAt": prop.get("reviewedAt"),
             "updatedAt": timestamp,
         }
-        try:
-            await db.theme_items.update_one(
-                {"themeId": theme_id, "inventoryItemId": inventory_id},
-                {"$set": link, "$setOnInsert": {"createdAt": timestamp}},
-                upsert=True,
-            )
-        except DuplicateKeyError:
-            await db.theme_props.update_one(
-                {"propId": prop_id},
-                {"$set": {"matchStatus": "NEEDS_REVIEW", "updatedAt": now()}},
-            )
-        await db.theme_items.delete_many(
-            {"themeId": theme_id, "propId": prop_id, "inventoryItemId": {"$ne": inventory_id}}
+        await db.theme_items.update_one(
+            {"themeId": theme_id, "propId": prop_id},
+            {"$set": link, "$setOnInsert": {"createdAt": timestamp}},
+            upsert=True,
         )
         return
     await db.theme_items.delete_many({"themeId": theme_id, "propId": prop_id})

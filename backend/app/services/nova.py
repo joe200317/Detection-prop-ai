@@ -815,6 +815,26 @@ Use SIMILAR_MATCH only if it is a genuinely different but suitable
 substitute. Never return NO_MATCH solely because the object is unworn,
 detached, held, placed separately, or displayed differently.
 
+10. REPEATED PRODUCTS — STRICT RULE
+The same inventory product may correctly match more than one detected prop.
+Match this detection on its own visible evidence. A repeated appearance is
+still a match.
+
+If this reference is the same physical product type as a candidate, return
+EXACT_MATCH when structure, essential parts, function and practical
+suitability are compatible. Use SIMILAR_MATCH only for a genuinely different
+but suitable substitute.
+
+Do NOT return NO_MATCH, and do not downgrade the match, only because:
+- The same product already appears somewhere else in the theme.
+- Another detection would also match this same inventory item.
+- The object looks like a duplicate of an already suitable product.
+- The candidate might already be linked to a different prop image.
+
+Duplicate linking is allowed. Each detection is matched independently.
+Never reject a candidate merely because it is the same product as another
+required prop.
+
 MATCH CLASSIFICATION:
 
 EXACT_MATCH:
@@ -841,7 +861,8 @@ structure or function is incompatible, a critical requirement
 is unsatisfied, the candidate is unsuitable, or inventory
 availability is not confirmed.
 
-NEVER return NO_MATCH solely because of color.
+NEVER return NO_MATCH solely because of color, presentation, or because
+the same inventory product also matches another detection.
 
 INVENTORY AVAILABILITY:
 A suitable candidate is available only when supplied stock data
@@ -977,7 +998,10 @@ OBJECT IDENTIFICATION:
 13. If the object's type cannot be established reliably, label
     it "unknown object", set usable=false and use low confidence.
 14. Do not split one physical object into multiple detections.
-15. Do not create duplicate entries for the same physical object.
+15. Do not draw two boxes around one single visible instance.
+    If the same product appears more than once as separate visible
+    instances, return a separate entry for each instance. Do not drop
+    a second mala, box, toy, or other repeated prop as a duplicate.
 16. Separate adjacent objects when they are distinct items.
 17. A single decorative arrangement may contain multiple physical
     objects; identify them separately when distinguishable.
@@ -1011,7 +1035,8 @@ BOUNDING BOXES:
     0 <= ymin < ymax <= 1000.
 30. Do not claim pixel-perfect boundaries when uncertain.
 31. If multiple instances of the same object exist, give each
-    distinct physical instance its own entry.
+    distinct physical instance its own entry. Repeated products are
+    required detections, not duplicates to omit.
 
 CONFIDENCE AND USABILITY:
 32. Confidence must reflect the reliability of object identification.
@@ -1049,7 +1074,8 @@ prop, baby accessory, clothing, furniture, setup,
 accessory, background item, other.
 
 Rules:
-- Return one entry per distinct physical object.
+- Return one entry per distinct physical instance.
+- Repeated products of the same type are valid separate entries.
 - Return props=[] only when no physical props are visible.
 - Never invent inventory IDs.
 - Return no markdown, explanations or additional keys.
