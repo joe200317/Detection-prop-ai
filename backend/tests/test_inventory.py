@@ -13,7 +13,6 @@ def test_create_assigns_permanent_sequential_ids(client):
         json={
             "name": " Anchor ",
             "category": "Prop",
-            "subcategory": "Nautical",
             "description": "Metal anchor",
         },
     )
@@ -29,7 +28,7 @@ def test_create_assigns_permanent_sequential_ids(client):
     assert second_body["inventoryId"] == "PROP-002"
     assert first_body["name"] == "Anchor"
     assert first_body["status"] == "available"
-    assert first_body["subcategory"] == "Nautical"
+    assert "subcategory" not in first_body
 
 
 def test_inventory_id_cannot_be_set_or_changed(client):

@@ -138,7 +138,7 @@ def test_pilot_matching_pipeline(client):
     fake = FakeNova()
     set_nova_client(fake)
     try:
-        anchor = client.post("/api/inventory", json={"name": "Anchor", "category": "Prop", "subcategory": "Nautical"}).json()
+        anchor = client.post("/api/inventory", json={"name": "Anchor", "category": "Prop"}).json()
         rope = client.post("/api/inventory", json={"name": "Rope", "category": "Prop"}).json()
         chest = client.post("/api/inventory", json={"name": "Wooden Chest", "category": "Prop", "status": "reserved"}).json()
         assert [anchor["inventoryId"], rope["inventoryId"], chest["inventoryId"]] == ["PROP-001", "PROP-002", "PROP-003"]

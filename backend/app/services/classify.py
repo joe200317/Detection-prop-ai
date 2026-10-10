@@ -110,7 +110,7 @@ def classify(
                 vector,
                 ver_confidence,
                 min(vector or 0, ver_confidence),
-                "Vector search and Nova verification disagree.",
+                "Vector search and GPT verification disagree.",
             )
         return _decision(
             "MISSING",
@@ -120,6 +120,30 @@ def classify(
             ver_confidence,
             None,
             ver_reason or "No suitable inventory candidate exists.",
+        )
+        
+    verified_candidate = next(
+        (
+            candidate
+            for candidate in candidates
+            if candidate.get("inventoryId") == ver_id
+        ),
+        None,
+    )
+
+    if (
+        verified_candidate is not None
+        and ver_decision in {"EXACT", "SIMILAR"}
+        and str(verified_candidate.get("status", "")).lower() == "available"
+    ):
+        return _decision(
+            "EXACT",
+            ver_id,
+            detection_confidence,
+            _number(verified_candidate.get("bestSimilarity")),
+            ver_confidence,
+            ver_confidence,
+            ver_reason or "A suitable prop type is available in inventory.",
         )
 
     def uncertain(reason: str, inventory_id: str | None = None) -> dict[str, Any]:
@@ -135,7 +159,7 @@ def classify(
         )
 
     if ver_confidence is not None and ver_confidence < settings.similar_threshold:
-        return uncertain("Vector similarity and Nova verification do not both support an exact match.")
+        return uncertain("Vector similarity and GPT verification do not both support an exact match.")
 
     agreed_exact = (
         ver_decision == "EXACT"
@@ -157,7 +181,7 @@ def classify(
         )
 
     if ver_decision == "NO_MATCH":
-        return uncertain("Vector search and Nova verification disagree.")
+        return uncertain("Vector search and GPT verification disagree.")
     if close:
         return uncertain("Multiple inventory candidates are too close to choose safely.")
     if ver_decision == "EXACT" and (ver_confidence is None or ver_confidence < settings.exact_threshold or vector < settings.exact_threshold):

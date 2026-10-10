@@ -40,7 +40,8 @@ async def ensure_inventory_embeddings(db: AsyncIOMotorDatabase, client) -> None:
     cursor = db.inventory_images.find({}, {"_id": 0, "imageId": 1, "imageUrl": 1, "embedding": 1, "metadata": 1})
     async for image in cursor:
         vector = image.get("embedding")
-        if isinstance(vector, list) and vector:
+        stored_model = (image.get("metadata") or {}).get("embeddingModel")
+        if isinstance(vector, list) and vector and stored_model == getattr(client, "embedding_model", None):
             continue
         image_url = image.get("imageUrl") or ""
         try:
@@ -58,7 +59,14 @@ async def ensure_inventory_embeddings(db: AsyncIOMotorDatabase, client) -> None:
             continue
         await db.inventory_images.update_one(
             {"imageId": image["imageId"]},
-            {"$set": {"embedding": embedded, "metadata.embeddingError": None, "updatedAt": now()}},
+            {
+                "$set": {
+                    "embedding": embedded,
+                    "metadata.embeddingError": None,
+                    "metadata.embeddingModel": getattr(client, "embedding_model", None),
+                    "updatedAt": now(),
+                }
+            },
         )
 
 
@@ -172,7 +180,7 @@ async def process_prop(db: AsyncIOMotorDatabase, prop: dict[str, Any], *, use_ca
             "verificationConfidence": saved.get("verificationConfidence"),
             "finalDecision": saved.get("matchStatus"),
             "modelResponse": {"detection": detection, "verification": verification},
-            "model": getattr(client, "vision_model", settings.nova_model_id),
+            "model": getattr(client, "vision_model", settings.openai_model_id),
             "processingTime": elapsed,
             "usage": usage,
             "error": saved.get("error"),

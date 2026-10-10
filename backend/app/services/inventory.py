@@ -28,7 +28,6 @@ async def create_inventory_item(db: AsyncIOMotorDatabase, payload: InventoryCrea
             "inventoryId": inventory_id,
             "name": payload.name,
             "category": payload.category,
-            "subcategory": payload.subcategory,
             "description": payload.description,
             "attributes": payload.attributes,
             "status": payload.status.value,

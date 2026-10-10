@@ -19,6 +19,20 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _public_box(prop: dict[str, Any]) -> dict[str, float] | None:
+    detection = prop.get("detection")
+    box = detection.get("box") if isinstance(detection, dict) else None
+    if not isinstance(box, dict):
+        return None
+    try:
+        values = {key: float(box[key]) for key in ("x", "y", "width", "height")}
+    except (KeyError, TypeError, ValueError):
+        return None
+    if values["width"] <= 0 or values["height"] <= 0:
+        return None
+    return values
+
+
 def availability_for(match_status: str | None, inventory_id: str | None) -> str:
     if match_status in {"PENDING", "PROCESSING"}:
         return "checking"
@@ -335,6 +349,7 @@ async def theme_result(db: AsyncIOMotorDatabase, theme_id: str) -> dict[str, Any
                 "propId": prop["propId"],
                 "detectedObject": prop.get("detectedObject"),
                 "sourceImage": prop.get("sourceImage"),
+                "box": _public_box(prop),
                 "inventoryItemId": prop.get("inventoryItemId"),
                 "inventoryName": None if inventory is None else inventory.get("name"),
                 "inventoryStatus": inventory_status,
@@ -385,6 +400,7 @@ async def add_inventory_image(
             "contentType": content_type,
             "size": len(data),
             "embeddingError": warning,
+            "embeddingModel": getattr(client, "embedding_model", None) if embedding else None,
         },
         "createdAt": timestamp,
         "updatedAt": timestamp,

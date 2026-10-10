@@ -25,6 +25,7 @@ export default function ThemeDetail({ themeId, onBack }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [selectedIds, setSelectedIds] = useState([]);
 
   useEffect(() => {
     let stop = false;
@@ -41,6 +42,7 @@ export default function ThemeDetail({ themeId, onBack }) {
         }
         setTheme(themeData);
         setRows(result.rows);
+        setSelectedIds((current) => current.filter((id) => result.rows.some((row) => row.propId === id)));
         setLogs(logData.items);
         setError("");
         const status = themeData.activeJob?.status;
@@ -91,10 +93,17 @@ export default function ThemeDetail({ themeId, onBack }) {
     }
   }
 
+  function toggleProp(propId) {
+    setSelectedIds((current) => (
+      current.includes(propId) ? current.filter((id) => id !== propId) : [...current, propId]
+    ));
+  }
+
   const progress = theme?.progress || {};
   const job = theme?.activeJob;
   const inInventory = rows.filter((row) => row.availability === "available").length;
   const notInInventory = rows.filter((row) => row.availability === "unavailable").length;
+  const selectedRows = rows.filter((row) => selectedIds.includes(row.propId));
 
   return (
     <main className="stack">
@@ -115,8 +124,7 @@ export default function ThemeDetail({ themeId, onBack }) {
       <section className="panel theme-tools">
         <div>
           <p className="section-label">Theme photo</p>
-          <p className="muted">Upload the theme photo only. Every prop in that photo is checked against inventory.</p>
-          {theme?.mainImage && <img className="preview" src={mediaUrl(theme.mainImage)} alt="Theme" />}
+          <p className="muted">Upload one theme photo. Click the props on it. More than one can stay selected.</p>
           <label>
             Upload theme photo
             <input
@@ -138,52 +146,95 @@ export default function ThemeDetail({ themeId, onBack }) {
             </button>
           </div>
         </div>
-      </section>
-
-      <section className="panel">
         <div className="counts">
           <span>In inventory {inInventory}</span>
           <span>Not in inventory {notInInventory}</span>
-          <span>Theme props {progress.totalProps || rows.length}</span>
+          <span>Selected {selectedRows.length}</span>
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Prop</th>
-                <th>Inventory</th>
-                <th>Availability</th>
-                <th>Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.propId}>
-                  <td>
-                    <div className="prop-name">
-                      {row.sourceImage && <img src={mediaUrl(row.sourceImage)} alt="" />}
-                      <strong>{row.detectedObject || "Unidentified"}</strong>
-                    </div>
-                    {row.aiReason && <span className="muted">{row.aiReason}</span>}
-                  </td>
-                  <td className="id">{row.inventoryItemId ? `${row.inventoryItemId} ${row.inventoryName || ""}` : "—"}</td>
-                  <td>
+      </section>
+
+      <section className="scene">
+        <div className="panel stage-panel">
+          {theme?.mainImage ? (
+            <div className="stage">
+              <img src={mediaUrl(theme.mainImage)} alt="Theme" />
+              {rows.map((row) => row.box && (
+                <button
+                  key={row.propId}
+                  type="button"
+                  className={`hotspot ${selectedIds.includes(row.propId) ? "on" : ""} ${row.availability || "unavailable"}`}
+                  style={{
+                    left: `${row.box.x * 100}%`,
+                    top: `${row.box.y * 100}%`,
+                    width: `${row.box.width * 100}%`,
+                    height: `${row.box.height * 100}%`,
+                  }}
+                  onClick={() => toggleProp(row.propId)}
+                >
+                  <span>{row.detectedObject || "Prop"}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">Upload a theme photo to see its props.</p>
+          )}
+        </div>
+        <div className="panel prop-picker">
+          <div className="list-head">
+            <h2>Props</h2>
+            <div className="actions">
+              <button type="button" className="secondary" disabled={!rows.length} onClick={() => setSelectedIds(rows.map((row) => row.propId))}>
+                Select all
+              </button>
+              <button type="button" className="secondary" disabled={!selectedIds.length} onClick={() => setSelectedIds([])}>
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="prop-list">
+            {rows.map((row) => {
+              const on = selectedIds.includes(row.propId);
+              return (
+                <button
+                  key={row.propId}
+                  type="button"
+                  className={`prop-card ${on ? "on" : ""}`}
+                  onClick={() => toggleProp(row.propId)}
+                  aria-pressed={on}
+                >
+                  {row.sourceImage && <img src={mediaUrl(row.sourceImage)} alt="" />}
+                  <span>
+                    <strong>{row.detectedObject || "Unidentified"}</strong>
                     <span className={`status ${row.availability === "available" ? "status-EXACT" : row.availability === "checking" ? "status-PENDING" : "status-MISSING"}`}>
                       {availabilityLabel(row.availability)}
                     </span>
-                  </td>
-                  <td>{percent(row.finalConfidence)}</td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="empty">Upload the theme photo. Props in that photo are checked against inventory.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                  </span>
+                </button>
+              );
+            })}
+            {rows.length === 0 && <p className="muted">Detected props show up here after the photo is checked.</p>}
+          </div>
         </div>
       </section>
+
+      {selectedRows.length > 0 && (
+        <section className="panel">
+          <h2>Selected props</h2>
+          <div className="selected-grid">
+            {selectedRows.map((row) => (
+              <article key={row.propId} className="selected-card">
+                {row.sourceImage && <img src={mediaUrl(row.sourceImage)} alt="" />}
+                <div>
+                  <strong>{row.detectedObject || "Unidentified"}</strong>
+                  <p className="muted">{row.inventoryItemId ? `${row.inventoryItemId} ${row.inventoryName || ""}` : "Not in inventory"}</p>
+                  <p>{percent(row.finalConfidence)} confidence</p>
+                  {row.aiReason && <p className="muted">{row.aiReason}</p>}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="panel">
         <h2>AI log</h2>

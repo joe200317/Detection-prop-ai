@@ -19,7 +19,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Nova vision</p>
+          <p className="eyebrow">GPT vision</p>
           <h1>Prop inventory</h1>
         </div>
         <nav className="nav">

@@ -15,7 +15,6 @@ const STATUSES = [
 const EMPTY_FORM = {
   name: "",
   category: "Prop",
-  subcategory: "",
   description: "",
   status: "available",
 };
@@ -48,6 +47,7 @@ export default function InventoryPage() {
   const [nameMatches, setNameMatches] = useState([]);
   const [confirmedDistinct, setConfirmedDistinct] = useState(false);
   const [images, setImages] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
   const [imageMessage, setImageMessage] = useState("");
 
   const loadItems = useCallback(async (nextPage = 0, nextQuery = "", nextStatus = "") => {
@@ -119,14 +119,21 @@ export default function InventoryPage() {
     }
   }
 
+  function clearPending() {
+    setPendingFiles((current) => {
+      current.forEach((item) => URL.revokeObjectURL(item.url));
+      return [];
+    });
+  }
+
   function beginEdit(item) {
+    clearPending();
     setEditingId(item.inventoryId);
     setImageMessage("");
     loadImages(item.inventoryId);
     setForm({
       name: item.name,
       category: item.category,
-      subcategory: item.subcategory || "",
       description: item.description || "",
       status: item.status,
     });
@@ -134,6 +141,7 @@ export default function InventoryPage() {
   }
 
   function cancelEdit() {
+    clearPending();
     setEditingId(null);
     setForm(EMPTY_FORM);
     setConfirmedDistinct(false);
@@ -141,19 +149,56 @@ export default function InventoryPage() {
     setImageMessage("");
   }
 
-  async function onUploadImage(event) {
-    const file = event.target.files?.[0];
+  function onPickNewImages(event) {
+    const files = [...(event.target.files || [])];
     event.target.value = "";
-    if (!file || !editingId) {
+    setPendingFiles((current) => {
+      const room = 5 - current.length;
+      const added = files.slice(0, room).map((file) => ({
+        id: `${file.name}-${file.size}-${crypto.randomUUID()}`,
+        file,
+        url: URL.createObjectURL(file),
+      }));
+      return [...current, ...added];
+    });
+  }
+
+  function removePending(id) {
+    setPendingFiles((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target) {
+        URL.revokeObjectURL(target.url);
+      }
+      return current.filter((item) => item.id !== id);
+    });
+  }
+
+  async function onUploadImage(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+    if (!files.length || !editingId) {
       return;
     }
     setImageMessage("");
+    const room = Math.max(0, 5 - images.length);
+    const batch = files.slice(0, room);
+    if (!batch.length) {
+      setImageMessage("An item can have at most 5 reference images.");
+      return;
+    }
+    const notes = [];
     try {
-      const saved = await uploadInventoryImage(editingId, file);
-      setImageMessage(saved.warning || "Reference image saved.");
+      for (const file of batch) {
+        const saved = await uploadInventoryImage(editingId, file);
+        if (saved.warning) {
+          notes.push(saved.warning);
+        }
+      }
+      setImageMessage(notes[0] || `${batch.length} reference image${batch.length === 1 ? "" : "s"} saved.`);
       await loadImages(editingId);
     } catch (err) {
       setImageMessage(err.message);
+      await loadImages(editingId);
     }
   }
 
@@ -173,18 +218,31 @@ export default function InventoryPage() {
     const payload = {
       name: form.name.trim(),
       category: form.category.trim(),
-      subcategory: form.subcategory.trim(),
       description: form.description.trim(),
       status: form.status,
     };
     try {
+      const notes = [];
       if (editingId) {
         await updateItem(editingId, payload);
       } else {
-        await createItem(payload);
+        const created = await createItem(payload);
+        for (const pending of pendingFiles) {
+          try {
+            const saved = await uploadInventoryImage(created.inventoryId, pending.file);
+            if (saved.warning) {
+              notes.push(saved.warning);
+            }
+          } catch (err) {
+            notes.push(err.message);
+          }
+        }
       }
       cancelEdit();
       await loadItems(page, query, statusFilter);
+      if (notes.length) {
+        setError(notes.join(" "));
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -222,10 +280,6 @@ export default function InventoryPage() {
               </datalist>
             </label>
             <label>
-              Subcategory
-              <input name="subcategory" value={form.subcategory} onChange={updateField} maxLength={100} />
-            </label>
-            <label>
               Description
               <textarea name="description" value={form.description} onChange={updateField} maxLength={2000} rows={4} />
             </label>
@@ -257,6 +311,34 @@ export default function InventoryPage() {
               </div>
             )}
 
+            {!editingId && (
+              <div className="references">
+                <p className="section-label">Prop images ({pendingFiles.length}/5)</p>
+                <p className="muted">Add the prop photos now. You can choose more than one.</p>
+                <div className="thumbs">
+                  {pendingFiles.map((image) => (
+                    <figure key={image.id}>
+                      <img src={image.url} alt={image.file.name} />
+                      <figcaption>{image.file.name}</figcaption>
+                      <button type="button" className="secondary" onClick={() => removePending(image.id)}>
+                        Remove
+                      </button>
+                    </figure>
+                  ))}
+                </div>
+                <label>
+                  Add images
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    onChange={onPickNewImages}
+                    disabled={pendingFiles.length >= 5}
+                  />
+                </label>
+              </div>
+            )}
+
             {editingId && (
               <div className="references">
                 <p className="section-label">Reference images ({images.length}/5)</p>
@@ -272,8 +354,8 @@ export default function InventoryPage() {
                   ))}
                 </div>
                 <label>
-                  Add image
-                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onUploadImage} disabled={images.length >= 5} />
+                  Add images
+                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={onUploadImage} disabled={images.length >= 5} />
                 </label>
                 {imageMessage && <p className="muted">{imageMessage}</p>}
               </div>
@@ -344,7 +426,6 @@ export default function InventoryPage() {
                     <td className="id">{item.inventoryId}</td>
                     <td>
                       <strong>{item.name}</strong>
-                      {item.subcategory && <span className="muted">{item.subcategory}</span>}
                     </td>
                     <td>{item.category}</td>
                     <td>

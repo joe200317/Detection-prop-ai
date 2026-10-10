@@ -24,12 +24,28 @@ class Settings(BaseSettings):
     nova_embedding_model_id: str = "amazon.nova-2-multimodal-embeddings-v1:0"
     nova_embedding_dimension: int = 1024
     nova_timeout_seconds: float = 60
+    gemini_api_key: str = ""
+    gemini_model_id: str = "gemini-3.8-flash"
+    gemini_embedding_model_id: str = "gemini-embedding-2"
+    gemini_embedding_dimension: int = 768
+    gemini_timeout_seconds: float = 60
+    openai_api_key: str = ""
+    openai_model_id: str = "gpt-5.6-sol"
+    openai_embedding_model_id: str = "text-embedding-3-large"
+    openai_embedding_dimension: int = 1536
+    openai_timeout_seconds: float = 120
 
     @field_validator(
         "aws_region",
         "aws_bearer_token_bedrock",
         "nova_model_id",
         "nova_embedding_model_id",
+        "gemini_api_key",
+        "gemini_model_id",
+        "gemini_embedding_model_id",
+        "openai_api_key",
+        "openai_model_id",
+        "openai_embedding_model_id",
         mode="before",
     )
     @classmethod

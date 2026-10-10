@@ -26,12 +26,11 @@ class InventoryCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=200)
     category: str = Field(min_length=1, max_length=100)
-    subcategory: str = Field(default="", max_length=100)
     description: str = Field(default="", max_length=2000)
     attributes: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     status: InventoryStatus = InventoryStatus.available
 
-    @field_validator("name", "category", "subcategory", "description", mode="before")
+    @field_validator("name", "category", "description", mode="before")
     @classmethod
     def strip_text(cls, value: Any) -> Any:
         return _strip_text(value)
@@ -42,12 +41,11 @@ class InventoryUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     category: str | None = Field(default=None, min_length=1, max_length=100)
-    subcategory: str | None = Field(default=None, max_length=100)
     description: str | None = Field(default=None, max_length=2000)
     attributes: dict[str, str | int | float | bool | None] | None = None
     status: InventoryStatus | None = None
 
-    @field_validator("name", "category", "subcategory", "description", mode="before")
+    @field_validator("name", "category", "description", mode="before")
     @classmethod
     def strip_text(cls, value: Any) -> Any:
         return _strip_text(value)
@@ -57,7 +55,6 @@ class InventoryItem(BaseModel):
     inventoryId: str
     name: str
     category: str
-    subcategory: str
     description: str
     attributes: dict[str, Any]
     status: InventoryStatus

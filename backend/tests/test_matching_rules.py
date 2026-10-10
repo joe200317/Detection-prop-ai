@@ -56,7 +56,13 @@ def test_parse_model_json_accepts_wrapped_and_truncated_lists():
     listed = parse_model_json('[{"detectedObject":"Gift"}]')
     assert listed["props"][0]["detectedObject"] == "Gift"
     truncated = parse_model_json('{"props":[{"detectedObject":"Santa hat"},{"detectedObject":"Gift"')
-    assert [item["detectedObject"] for item in truncated["props"]] == ["Santa hat"]
+    assert [item["detectedObject"] for item in truncated["props"]] == ["Santa hat", "Gift"]
+    cut_off = (
+        '{"props":[{"detectedObject":"bottle","category":"container","role":"prop",'
+        '"color":"silver","material":"metal","shape":"cylindrical",'
+        '"visualFeatures":["measurement markings","cap","'
+    )
+    assert parse_model_json(cut_off)["props"][0]["detectedObject"] == "bottle"
 
 
 def test_box_covers_full_object_extent():
