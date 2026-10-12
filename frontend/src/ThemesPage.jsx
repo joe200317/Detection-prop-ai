@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
 import { createTheme, listThemes } from "./api";
+import Pager from "./Pager";
+
+const PAGE_SIZE = 10;
 
 export default function ThemesPage({ onOpen }) {
   const [themes, setThemes] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  async function load() {
+  async function load(nextPage = page) {
     try {
-      const data = await listThemes();
+      const data = await listThemes({ skip: nextPage * PAGE_SIZE, limit: PAGE_SIZE });
       setThemes(data.items);
+      setTotal(data.total ?? data.items.length);
       setError("");
     } catch (err) {
       setError(err.message);
@@ -19,10 +25,11 @@ export default function ThemesPage({ onOpen }) {
 
   useEffect(() => {
     let cancel = false;
-    listThemes()
+    listThemes({ skip: page * PAGE_SIZE, limit: PAGE_SIZE })
       .then((data) => {
         if (!cancel) {
           setThemes(data.items);
+          setTotal(data.total ?? data.items.length);
         }
       })
       .catch((err) => {
@@ -33,7 +40,7 @@ export default function ThemesPage({ onOpen }) {
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [page]);
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -68,7 +75,7 @@ export default function ThemesPage({ onOpen }) {
       <section className="panel list-panel">
         <div className="list-head">
           <h2>Themes</h2>
-          <p>{themes.length} theme{themes.length === 1 ? "" : "s"}</p>
+          <p>{total} theme{total === 1 ? "" : "s"}</p>
         </div>
         {error && <p className="error">{error}</p>}
         <div className="table-wrap">
@@ -100,6 +107,7 @@ export default function ThemesPage({ onOpen }) {
             </tbody>
           </table>
         </div>
+        <Pager page={page} pageCount={Math.max(1, Math.ceil(total / PAGE_SIZE))} onPage={setPage} />
       </section>
     </main>
   );

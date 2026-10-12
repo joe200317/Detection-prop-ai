@@ -7,12 +7,11 @@ from app.services.jobs import enqueue_job
 from app.services.themes import get_prop, now, save_prop_result
 
 
-async def list_review_items(db: AsyncIOMotorDatabase) -> list[dict[str, Any]]:
-    cursor = db.theme_props.find(
-        {"matchStatus": {"$in": ["SIMILAR", "NEEDS_REVIEW"]}},
-        {"_id": 0},
-    ).sort("updatedAt", -1)
-    props = await cursor.to_list(length=200)
+async def list_review_items(db: AsyncIOMotorDatabase, skip: int = 0, limit: int = 20) -> dict[str, Any]:
+    query = {"matchStatus": {"$in": ["SIMILAR", "NEEDS_REVIEW"]}}
+    total = await db.theme_props.count_documents(query)
+    cursor = db.theme_props.find(query, {"_id": 0}).sort("updatedAt", -1).skip(skip).limit(limit)
+    props = await cursor.to_list(length=limit)
     theme_ids = list({prop["themeId"] for prop in props})
     themes = {}
     if theme_ids:
@@ -20,7 +19,7 @@ async def list_review_items(db: AsyncIOMotorDatabase) -> list[dict[str, Any]]:
             themes[theme["themeId"]] = theme.get("name")
     for prop in props:
         prop["themeName"] = themes.get(prop["themeId"])
-    return props
+    return {"items": props, "total": total}
 
 
 async def apply_review(

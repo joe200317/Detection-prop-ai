@@ -10,7 +10,7 @@ from app.services.errors import AIServiceError
 from app.services.nova import get_nova_client
 from app.services.storage import read_stored, sha256_bytes
 from app.services.themes import get_theme, now, save_prop_result
-from app.services.vector_search import search_inventory_images
+from app.services.vector_search import embeddings_ready, invalidate_inventory_cache, mark_embeddings_ready, search_inventory_images
 
 SKIP_ON_ANALYZE = {"EXACT", "SIMILAR", "MISSING", "NOT_DETECTED", "NEEDS_REVIEW"}
 
@@ -37,6 +37,10 @@ async def store_cache(
 
 
 async def ensure_inventory_embeddings(db: AsyncIOMotorDatabase, client) -> None:
+    if embeddings_ready():
+        return
+    wrote = False
+    missing = False
     cursor = db.inventory_images.find({}, {"_id": 0, "imageId": 1, "imageUrl": 1, "embedding": 1, "metadata": 1})
     async for image in cursor:
         vector = image.get("embedding")
@@ -47,16 +51,19 @@ async def ensure_inventory_embeddings(db: AsyncIOMotorDatabase, client) -> None:
         try:
             data = read_stored(image_url)
         except AIServiceError:
+            missing = True
             continue
         content_type = (image.get("metadata") or {}).get("contentType") or content_type_for(image_url)
         try:
             embedded, _cached = await cached_embedding(db, data, content_type, client, purpose="GENERIC_INDEX")
         except AIServiceError as exc:
+            missing = True
             await db.inventory_images.update_one(
                 {"imageId": image["imageId"]},
                 {"$set": {"metadata.embeddingError": str(exc), "updatedAt": now()}},
             )
             continue
+        wrote = True
         await db.inventory_images.update_one(
             {"imageId": image["imageId"]},
             {
@@ -68,6 +75,10 @@ async def ensure_inventory_embeddings(db: AsyncIOMotorDatabase, client) -> None:
                 }
             },
         )
+    if wrote:
+        invalidate_inventory_cache()
+    if not missing:
+        mark_embeddings_ready()
 
 
 async def cached_embedding(

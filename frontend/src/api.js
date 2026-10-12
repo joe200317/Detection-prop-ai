@@ -96,8 +96,8 @@ export function deleteInventoryImage(inventoryId, imageId) {
   return request(`/api/inventory/${inventoryId}/images/${imageId}`, { method: "DELETE" });
 }
 
-export function listThemes() {
-  return request("/api/themes?limit=100");
+export function listThemes(params = {}) {
+  return request(`/api/themes${queryString({ limit: 10, ...params })}`);
 }
 
 export function createTheme(payload) {
@@ -140,12 +140,12 @@ export function getResult(themeId) {
   return request(`/api/themes/${themeId}/result`);
 }
 
-export function getLogs(themeId) {
-  return request(`/api/themes/${themeId}/logs`);
+export function getLogs(themeId, params = {}) {
+  return request(`/api/themes/${themeId}/logs${queryString({ limit: 10, ...params })}`);
 }
 
-export function getReview() {
-  return request("/api/review");
+export function getReview(params = {}) {
+  return request(`/api/review${queryString({ limit: 8, ...params })}`);
 }
 
 export function reviewProp(themeId, propId, payload) {

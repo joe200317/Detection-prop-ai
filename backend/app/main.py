@@ -2,8 +2,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pymongo.errors import PyMongoError
 
@@ -12,7 +13,8 @@ from app.database import close, ensure_database
 from app.routers.images import router as image_router
 from app.routers.inventory import router as inventory_router
 from app.routers.themes import router as theme_router
-from app.services.storage import upload_root
+from app.services.errors import AIServiceError
+from app.services.storage import open_media, upload_root
 from app.worker import job_worker
 
 logging.basicConfig(level=logging.INFO)
@@ -53,7 +55,18 @@ app.add_middleware(
 app.include_router(inventory_router)
 app.include_router(image_router)
 app.include_router(theme_router)
-app.mount("/uploads", StaticFiles(directory=str(upload_root())), name="uploads")
+_legacy_uploads = upload_root()
+if _legacy_uploads.is_dir():
+    app.mount("/uploads", StaticFiles(directory=str(_legacy_uploads)), name="uploads")
+
+
+@app.get("/media/{key:path}")
+async def media(key: str) -> Response:
+    try:
+        data, content_type = open_media(key)
+    except AIServiceError:
+        raise HTTPException(status_code=404, detail="Image not found") from None
+    return Response(content=data, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/api/health")

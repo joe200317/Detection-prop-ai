@@ -47,7 +47,7 @@ async def list_items(
     category: str | None = Query(default=None, max_length=100),
     status: InventoryStatus | None = None,
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=10, ge=1, le=10),
 ) -> InventoryList:
     result = await list_inventory_items(
         await get_database(request),

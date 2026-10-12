@@ -13,7 +13,6 @@ from app.services.themes import (
     add_prop_image,
     create_theme,
     get_theme,
-    list_props,
     list_themes,
     set_main_image,
     theme_result,
@@ -97,7 +96,6 @@ async def get_one_theme(theme_id: str, request: Request) -> dict:
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     theme["activeJob"] = await latest_job(db, theme_id)
-    theme["props"] = await list_props(db, theme_id)
     return theme
 
 
@@ -117,8 +115,8 @@ async def post_main_image(theme_id: str, request: Request, file: UploadFile = Fi
     data, content_type = await read_image(file)
     try:
         return await set_main_image(await get_database(request), _theme_or_404(theme_id), data, content_type)
-    except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (NotFoundError, RequestError) as exc:
+        raise _map(exc) from exc
 
 
 @router.post("/api/themes/{theme_id}/props", status_code=201)
@@ -132,8 +130,8 @@ async def post_prop(theme_id: str, request: Request, file: UploadFile = File(...
             content_type,
             file.filename or "prop",
         )
-    except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (NotFoundError, RequestError) as exc:
+        raise _map(exc) from exc
 
 
 @router.get("/api/themes/{theme_id}/result")
@@ -186,15 +184,23 @@ async def retry(theme_id: str, payload: RetryRequest, request: Request) -> dict:
 async def get_logs(
     theme_id: str,
     request: Request,
-    limit: int = Query(default=50, ge=1, le=200),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
 ) -> dict:
     db = await get_database(request)
     try:
         await get_theme(db, _theme_or_404(theme_id))
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    cursor = db.ai_match_logs.find({"themeId": theme_id}, {"_id": 0}).sort("createdAt", -1).limit(limit)
-    return {"items": await cursor.to_list(length=limit)}
+    query = {"themeId": theme_id}
+    total = await db.ai_match_logs.count_documents(query)
+    cursor = (
+        db.ai_match_logs.find(query, {"_id": 0, "modelResponse": 0})
+        .sort("createdAt", -1)
+        .skip(skip)
+        .limit(limit)
+    )
+    return {"items": await cursor.to_list(length=limit), "total": total}
 
 
 @router.post("/api/themes/{theme_id}/props/{prop_id}/review")
@@ -225,5 +231,9 @@ async def get_one_job(job_id: str, request: Request) -> dict:
 
 
 @router.get("/api/review")
-async def get_review_queue(request: Request) -> dict:
-    return {"items": await list_review_items(await get_database(request))}
+async def get_review_queue(
+    request: Request,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict:
+    return await list_review_items(await get_database(request), skip, limit)

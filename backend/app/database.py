@@ -85,6 +85,7 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.theme_props.create_index("propId", unique=True)
     await db.theme_props.create_index([("themeId", 1), ("imageHash", 1)], unique=True)
     await db.theme_props.create_index([("themeId", 1), ("matchStatus", 1)])
+    await db.theme_props.create_index([("matchStatus", 1), ("updatedAt", -1)])
     await _allow_duplicate_theme_links(db)
     await db.theme_items.create_index([("themeId", 1), ("inventoryItemId", 1)])
     await db.theme_items.create_index([("themeId", 1), ("propId", 1)], unique=True)

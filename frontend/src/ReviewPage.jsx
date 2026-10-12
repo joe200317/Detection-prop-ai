@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { getReview, listItems, mediaUrl, reviewProp } from "./api";
+import Pager from "./Pager";
+
+const PAGE_SIZE = 8;
 
 function percent(value) {
   if (value === null || value === undefined) {
@@ -10,6 +13,8 @@ function percent(value) {
 
 export default function ReviewPage() {
   const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
   const [error, setError] = useState("");
   const [reviewer, setReviewer] = useState("");
@@ -18,9 +23,10 @@ export default function ReviewPage() {
   const [choice, setChoice] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function load() {
-    const data = await getReview();
+  async function load(nextPage = page) {
+    const data = await getReview({ skip: nextPage * PAGE_SIZE, limit: PAGE_SIZE });
     setItems(data.items);
+    setTotal(data.total ?? data.items.length);
     setSelectedId((current) => (
       data.items.some((item) => item.propId === current) ? current : data.items[0]?.propId || null
     ));
@@ -28,12 +34,13 @@ export default function ReviewPage() {
 
   useEffect(() => {
     let cancel = false;
-    getReview()
+    getReview({ skip: page * PAGE_SIZE, limit: PAGE_SIZE })
       .then((data) => {
         if (cancel) {
           return;
         }
         setItems(data.items);
+        setTotal(data.total ?? data.items.length);
         setSelectedId(data.items[0]?.propId || null);
       })
       .catch((err) => {
@@ -44,7 +51,7 @@ export default function ReviewPage() {
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [page]);
 
   const selected = items.find((item) => item.propId === selectedId) || null;
   const candidate = selected?.candidates?.[0];
@@ -72,7 +79,7 @@ export default function ReviewPage() {
   async function searchItems(event) {
     event.preventDefault();
     try {
-      const data = await listItems({ q: query, limit: 20 });
+      const data = await listItems({ q: query, limit: 10 });
       setChoices(data.items);
       setChoice(data.items[0]?.inventoryId || "");
     } catch (err) {
@@ -83,7 +90,7 @@ export default function ReviewPage() {
   return (
     <main className="layout review-layout">
       <section className="panel">
-        <h2>Needs review</h2>
+        <h2>Needs a decision</h2>
         {error && <p className="error">{error}</p>}
         <div className="review-list">
           {items.map((item) => (
@@ -96,8 +103,9 @@ export default function ReviewPage() {
               {item.themeId} · {item.detectedObject || "Unidentified"} · {item.matchStatus}
             </button>
           ))}
-          {items.length === 0 && <p className="muted">No similar or uncertain matches.</p>}
+          {items.length === 0 && <p className="muted">Nothing needs a decision right now.</p>}
         </div>
+        <Pager page={page} pageCount={Math.max(1, Math.ceil(total / PAGE_SIZE))} onPage={setPage} />
       </section>
       <section className="panel">
         {!selected && <p className="muted">Select a prop to review.</p>}

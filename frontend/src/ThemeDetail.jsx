@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { getLogs, getResult, getTheme, mediaUrl, retryTheme, scanTheme, uploadMainImage } from "./api";
+import { getJob, getLogs, getResult, getTheme, mediaUrl, retryTheme, scanTheme, uploadMainImage } from "./api";
+import Pager from "./Pager";
+
+const LOG_PAGE = 10;
+const PROP_PAGE = 8;
 
 function availabilityLabel(value) {
   if (value === "available") {
@@ -24,8 +28,12 @@ export default function ThemeDetail({ themeId, onBack }) {
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [logPage, setLogPage] = useState(0);
+  const [logTotal, setLogTotal] = useState(0);
+  const [propPage, setPropPage] = useState(0);
 
   useEffect(() => {
     let stop = false;
@@ -35,7 +43,7 @@ export default function ThemeDetail({ themeId, onBack }) {
         const [themeData, result, logData] = await Promise.all([
           getTheme(themeId),
           getResult(themeId),
-          getLogs(themeId),
+          getLogs(themeId, { skip: logPage * LOG_PAGE, limit: LOG_PAGE }),
         ]);
         if (stop) {
           return;
@@ -44,10 +52,12 @@ export default function ThemeDetail({ themeId, onBack }) {
         setRows(result.rows);
         setSelectedIds((current) => current.filter((id) => result.rows.some((row) => row.propId === id)));
         setLogs(logData.items);
+        setLogTotal(logData.total ?? logData.items.length);
         setError("");
         const status = themeData.activeJob?.status;
-        if (status === "queued" || status === "running") {
-          timer = setTimeout(load, 1500);
+        const jobId = themeData.activeJob?.jobId;
+        if ((status === "queued" || status === "running") && jobId) {
+          timer = setTimeout(() => watch(jobId), 1000);
         }
       } catch (err) {
         if (!stop) {
@@ -55,12 +65,36 @@ export default function ThemeDetail({ themeId, onBack }) {
         }
       }
     }
+    async function watch(jobId) {
+      try {
+        const job = await getJob(jobId);
+        if (stop) {
+          return;
+        }
+        if (job.status === "queued" || job.status === "running") {
+          setTheme((current) => (current ? { ...current, activeJob: job } : current));
+          timer = setTimeout(() => watch(jobId), 1000);
+          return;
+        }
+        if (job.status === "failed" && job.error) {
+          setError(job.error);
+        }
+      } catch (err) {
+        if (!stop) {
+          setError(err.message);
+        }
+        return;
+      }
+      if (!stop) {
+        setReloadKey((value) => value + 1);
+      }
+    }
     load();
     return () => {
       stop = true;
       clearTimeout(timer);
     };
-  }, [themeId, reloadKey]);
+  }, [themeId, reloadKey, logPage]);
 
   async function uploadOne(event, uploader) {
     const file = event.target.files?.[0];
@@ -77,6 +111,32 @@ export default function ThemeDetail({ themeId, onBack }) {
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function waitForJob(jobId) {
+    let job = await getJob(jobId);
+    while (job.status === "queued" || job.status === "running") {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      job = await getJob(jobId);
+    }
+    return job;
+  }
+
+  async function checkInventory() {
+    setChecking(true);
+    setError("");
+    try {
+      const started = await scanTheme(themeId);
+      const job = await waitForJob(started.jobId);
+      if (job.status === "failed" && job.error) {
+        setError(job.error);
+      }
+      setReloadKey((value) => value + 1);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setChecking(false);
     }
   }
 
@@ -101,12 +161,23 @@ export default function ThemeDetail({ themeId, onBack }) {
 
   const progress = theme?.progress || {};
   const job = theme?.activeJob;
+  const aiChecking = checking || job?.status === "queued" || job?.status === "running";
   const inInventory = rows.filter((row) => row.availability === "available").length;
   const notInInventory = rows.filter((row) => row.availability === "unavailable").length;
   const selectedRows = rows.filter((row) => selectedIds.includes(row.propId));
+  const propPageCount = Math.max(1, Math.ceil(rows.length / PROP_PAGE));
+  const safePropPage = Math.min(propPage, propPageCount - 1);
+  const visibleProps = rows.slice(safePropPage * PROP_PAGE, (safePropPage + 1) * PROP_PAGE);
+  const logPageCount = Math.max(1, Math.ceil(logTotal / LOG_PAGE));
 
   return (
     <main className="stack">
+      {aiChecking && (
+        <div className="loader-overlay" role="status" aria-live="polite">
+          <div className="spinner" />
+          <p>AI is checking</p>
+        </div>
+      )}
       <div className="list-head">
         <div>
           <button type="button" className="secondary" onClick={onBack}>Back</button>
@@ -138,8 +209,8 @@ export default function ThemeDetail({ themeId, onBack }) {
             />
           </label>
           <div className="actions">
-            <button type="button" disabled={busy || !theme?.mainImage} onClick={() => run(() => scanTheme(themeId))}>
-              Check inventory
+            <button type="button" disabled={busy || aiChecking || !theme?.mainImage} onClick={checkInventory}>
+              {aiChecking ? "AI is checking" : "Check inventory"}
             </button>
             <button type="button" className="secondary" disabled={busy} onClick={() => run(() => retryTheme(themeId, { scope: "failed" }))}>
               Retry failed
@@ -192,7 +263,7 @@ export default function ThemeDetail({ themeId, onBack }) {
             </div>
           </div>
           <div className="prop-list">
-            {rows.map((row) => {
+            {visibleProps.map((row) => {
               const on = selectedIds.includes(row.propId);
               return (
                 <button
@@ -214,6 +285,7 @@ export default function ThemeDetail({ themeId, onBack }) {
             })}
             {rows.length === 0 && <p className="muted">Detected props show up here after the photo is checked.</p>}
           </div>
+          <Pager page={safePropPage} pageCount={propPageCount} onPage={setPropPage} />
         </div>
       </section>
 
@@ -265,6 +337,7 @@ export default function ThemeDetail({ themeId, onBack }) {
             </tbody>
           </table>
         </div>
+        <Pager page={logPage} pageCount={logPageCount} onPage={setLogPage} />
       </section>
     </main>
   );

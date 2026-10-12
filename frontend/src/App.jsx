@@ -19,8 +19,8 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div>
-          <p className="eyebrow">GPT vision</p>
           <h1>Prop inventory</h1>
+          <p className="topbar-note">Add props, then check a theme photo against them.</p>
         </div>
         <nav className="nav">
           {VIEWS.map(([id, label]) => (

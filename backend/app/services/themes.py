@@ -9,6 +9,7 @@ from app.services.errors import NotFoundError, RequestError
 from app.services.ids import next_id
 from app.services.nova import get_nova_client
 from app.services.storage import delete_stored, save_image, sha256_bytes
+from app.services.vector_search import invalidate_inventory_cache
 
 DONE_STATUSES = {"EXACT", "SIMILAR", "MISSING", "NOT_DETECTED", "NEEDS_REVIEW", "AI_FAILED"}
 LINK_STATUSES = {"EXACT", "SIMILAR", "NEEDS_REVIEW"}
@@ -375,6 +376,7 @@ async def add_inventory_image(
         "updatedAt": timestamp,
     }
     await db.inventory_images.insert_one(document)
+    invalidate_inventory_cache()
     stored = public(document)
     stored["embeddingReady"] = embedding is not None
     if warning:
@@ -400,6 +402,7 @@ async def delete_inventory_image(db: AsyncIOMotorDatabase, inventory_id: str, im
     if document is None:
         raise NotFoundError("Inventory image not found")
     delete_stored(document.get("imageUrl"))
+    invalidate_inventory_cache()
 
 
 async def embed_with_cache(

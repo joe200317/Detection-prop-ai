@@ -6,6 +6,27 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.services.errors import AIServiceError
 
 
+_generation = 0
+_loaded_generation = -1
+_catalog: list[dict[str, Any]] | None = None
+_embeddings_ready = False
+
+
+def invalidate_inventory_cache() -> None:
+    global _generation, _embeddings_ready
+    _generation += 1
+    _embeddings_ready = False
+
+
+def embeddings_ready() -> bool:
+    return _embeddings_ready
+
+
+def mark_embeddings_ready() -> None:
+    global _embeddings_ready
+    _embeddings_ready = True
+
+
 def cosine(left: list[float], right: list[float]) -> float:
     if not left or not right or len(left) != len(right):
         return 0.0
@@ -56,41 +77,64 @@ def group_by_inventory(scored_images: list[dict[str, Any]], limit: int) -> list[
     return ranked[:limit]
 
 
+async def _load_catalog(db: AsyncIOMotorDatabase) -> list[dict[str, Any]]:
+    global _catalog, _loaded_generation
+    if _catalog is not None and _loaded_generation == _generation:
+        return _catalog
+    items: dict[str, dict[str, Any]] = {}
+    item_cursor = db.inventory_items.find(
+        {},
+        {"_id": 0, "inventoryId": 1, "name": 1, "category": 1, "description": 1, "status": 1},
+    )
+    async for item in item_cursor:
+        items[item["inventoryId"]] = item
+    rows: list[dict[str, Any]] = []
+    image_cursor = db.inventory_images.find(
+        {"embedding": {"$type": "array"}},
+        {"_id": 0, "inventoryId": 1, "imageId": 1, "imageUrl": 1, "embedding": 1},
+    )
+    async for image in image_cursor:
+        item = items.get(image.get("inventoryId"))
+        vector = image.get("embedding")
+        if item is None or not isinstance(vector, list):
+            continue
+        rows.append(
+            {
+                "inventoryId": item["inventoryId"],
+                "name": item.get("name"),
+                "category": item.get("category"),
+                "description": item.get("description"),
+                "status": item.get("status"),
+                "imageId": image.get("imageId"),
+                "imageUrl": image.get("imageUrl"),
+                "vector": vector,
+            }
+        )
+    _catalog = rows
+    _loaded_generation = _generation
+    return rows
+
+
 async def search_inventory_images(
     db: AsyncIOMotorDatabase,
     embedding: list[float],
     limit: int,
 ) -> list[dict[str, Any]]:
     try:
-        items: dict[str, dict[str, Any]] = {}
-        item_cursor = db.inventory_items.find(
-            {},
-            {"_id": 0, "inventoryId": 1, "name": 1, "category": 1, "description": 1, "status": 1},
-        )
-        async for item in item_cursor:
-            items[item["inventoryId"]] = item
-        scored: list[dict[str, Any]] = []
-        image_cursor = db.inventory_images.find(
-            {"embedding": {"$type": "array"}},
-            {"_id": 0, "inventoryId": 1, "imageId": 1, "imageUrl": 1, "embedding": 1},
-        )
-        async for image in image_cursor:
-            item = items.get(image.get("inventoryId"))
-            vector = image.get("embedding")
-            if item is None or not isinstance(vector, list):
-                continue
-            scored.append(
-                {
-                    "inventoryId": item["inventoryId"],
-                    "name": item.get("name"),
-                    "category": item.get("category"),
-                    "description": item.get("description"),
-                    "status": item.get("status"),
-                    "imageId": image.get("imageId"),
-                    "imageUrl": image.get("imageUrl"),
-                    "similarity": cosine(embedding, vector),
-                }
-            )
+        catalog = await _load_catalog(db)
+        scored = [
+            {
+                "inventoryId": row["inventoryId"],
+                "name": row.get("name"),
+                "category": row.get("category"),
+                "description": row.get("description"),
+                "status": row.get("status"),
+                "imageId": row.get("imageId"),
+                "imageUrl": row.get("imageUrl"),
+                "similarity": cosine(embedding, row["vector"]),
+            }
+            for row in catalog
+        ]
     except Exception as exc:
         raise AIServiceError("Vector search failed", "vector_search") from exc
     return group_by_inventory(scored, limit)

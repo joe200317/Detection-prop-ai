@@ -16,6 +16,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173,http://127.0.0.1:5174"
     )
     upload_dir: str = "uploads"
+    s3_bucket: str = ""
+    s3_prefix: str = "props"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
     max_image_bytes: int = 8_000_000
     max_inventory_images: int = 5
     aws_region: str = "us-east-1"
@@ -37,6 +41,10 @@ class Settings(BaseSettings):
 
     @field_validator(
         "aws_region",
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "s3_bucket",
+        "s3_prefix",
         "aws_bearer_token_bedrock",
         "nova_model_id",
         "nova_embedding_model_id",

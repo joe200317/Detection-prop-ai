@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { createItem, deleteInventoryImage, getHealth, listImages, listItems, mediaUrl, updateItem, uploadInventoryImage } from "./api";
+import Pager from "./Pager";
 import "./App.css";
 
 const STATUSES = [
@@ -19,7 +20,7 @@ const EMPTY_FORM = {
   status: "available",
 };
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
 
 function statusLabel(value) {
   return STATUSES.find(([status]) => status === value)?.[1] || value;
@@ -54,21 +55,14 @@ export default function InventoryPage() {
     setLoading(true);
     setError("");
     try {
-      const [health, data] = await Promise.all([
-        getHealth(),
-        listItems({
-          q: nextQuery,
-          status: nextStatus,
-          skip: nextPage * PAGE_SIZE,
-          limit: PAGE_SIZE,
-        }),
-      ]);
-      setDatabase(health.database);
+      const data = await listItems({
+        q: nextQuery,
+        status: nextStatus,
+        skip: nextPage * PAGE_SIZE,
+        limit: PAGE_SIZE,
+      });
       setItems(data.items);
       setTotal(data.total);
-      if (health.database !== "connected") {
-        setError("MongoDB is not available. Start MongoDB on localhost:27017.");
-      }
     } catch (err) {
       setItems([]);
       setTotal(0);
@@ -76,6 +70,23 @@ export default function InventoryPage() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    let cancel = false;
+    getHealth()
+      .then((health) => {
+        if (!cancel) {
+          setDatabase(health.database);
+          if (health.database !== "connected") {
+            setError("MongoDB is not available. Start MongoDB on localhost:27017.");
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancel = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -284,7 +295,7 @@ export default function InventoryPage() {
               <textarea name="description" value={form.description} onChange={updateField} maxLength={2000} rows={4} />
             </label>
             <label>
-              Physical status
+              Status
               <select name="status" value={form.status} onChange={updateField}>
                 {STATUSES.map(([value, label]) => (
                   <option key={value} value={value}>
@@ -445,24 +456,7 @@ export default function InventoryPage() {
             </table>
           </div>
 
-          {total > PAGE_SIZE && (
-            <div className="pager">
-              <button type="button" className="secondary" disabled={page === 0} onClick={() => changePage(page - 1)}>
-                Previous
-              </button>
-              <span>
-                Page {page + 1} of {pageCount}
-              </span>
-              <button
-                type="button"
-                className="secondary"
-                disabled={page + 1 >= pageCount}
-                onClick={() => changePage(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          )}
+          <Pager page={page} pageCount={pageCount} onPage={changePage} />
         </section>
     </main>
   );
