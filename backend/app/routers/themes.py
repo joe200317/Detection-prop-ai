@@ -5,7 +5,8 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.deps import get_database
-from app.services.errors import NotFoundError, RequestError
+from app.services.detect import detect_uploaded_image
+from app.services.errors import AIServiceError, NotFoundError, RequestError
 from app.services.jobs import enqueue_job, get_job, latest_job
 from app.services.review import apply_review, list_review_items
 from app.services.storage import read_image
@@ -86,6 +87,20 @@ async def get_themes(
 @router.post("/api/themes", status_code=201)
 async def post_theme(payload: ThemeCreate, request: Request) -> dict:
     return await create_theme(await get_database(request), payload.name, payload.status)
+
+
+@router.post("/api/detect")
+async def detect_image(request: Request, file: UploadFile = File(...)) -> dict:
+    data, content_type = await read_image(file)
+    try:
+        return await detect_uploaded_image(
+            await get_database(request),
+            data,
+            content_type,
+            file.filename or "theme",
+        )
+    except AIServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/api/themes/{theme_id}")

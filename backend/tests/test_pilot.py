@@ -301,3 +301,58 @@ def test_theme_photo_checks_inventory(client):
         assert rows["Rope"]["inventoryItemId"] == rope["inventoryId"]
     finally:
         set_nova_client(None)
+
+
+def test_direct_image_detects_and_rejects(client):
+    fake = FakeNova()
+    set_nova_client(fake)
+    try:
+        anchor = client.post("/api/inventory", json={"name": "Anchor", "category": "Prop"}).json()
+        rope = client.post("/api/inventory", json={"name": "Rope", "category": "Prop"}).json()
+        upload_reference(client, fake, anchor["inventoryId"], tiny_png(1, 0, 0), [1, 0, 0])
+        upload_reference(client, fake, rope["inventoryId"], tiny_png(0, 1, 0), [0, 1, 0])
+        fake.discover_props = [
+            {**detection("Anchor"), "box": {"x": 0, "y": 0, "width": 0.5, "height": 1}},
+            {**detection("Rope"), "box": {"x": 0.5, "y": 0, "width": 0.5, "height": 1}},
+            {**detection("Lantern"), "box": {"x": 0.2, "y": 0.2, "width": 0.2, "height": 0.2}},
+        ]
+        fake.embed_queue = [[0.99, 0.02, 0], [0.02, 0.99, 0], [0.1, 0.1, 0.1]]
+        fake.verdicts["Anchor"] = {"decision": "EXACT", "inventoryId": anchor["inventoryId"], "confidence": 0.95, "reason": "Same anchor."}
+        fake.verdicts["Rope"] = {"decision": "EXACT", "inventoryId": rope["inventoryId"], "confidence": 0.94, "reason": "Same rope."}
+        fake.verdicts["Lantern"] = {"decision": "NO_MATCH", "inventoryId": None, "confidence": 0.2, "reason": "Lantern is not in inventory."}
+
+        response = client.post(
+            "/api/detect",
+            files={"file": ("party.png", theme_photo(), "image/png")},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["detectedCount"] == 3
+        assert body["acceptedCount"] == 2
+        assert body["rejectedCount"] == 1
+        assert body["counts"]["EXACT"] == 2
+        assert body["counts"]["MISSING"] == 1
+        rejected = body["rejected"][0]
+        assert rejected["detectedObject"] == "Lantern"
+        assert rejected["matchStatus"] == "MISSING"
+        assert rejected["inventoryItemId"] is None
+        assert rejected["aiReason"] == "Lantern is not in inventory."
+        assert rejected["box"]["width"] > 0
+        accepted = {row["detectedObject"]: row for row in body["accepted"]}
+        assert accepted["Anchor"]["inventoryItemId"] == anchor["inventoryId"]
+        assert accepted["Anchor"]["availability"] == "available"
+        assert accepted["Rope"]["finalConfidence"] is not None
+        assert len(body["detected"]) == 3
+
+        empty = FakeNova()
+        set_nova_client(empty)
+        none_found = client.post(
+            "/api/detect",
+            files={"file": ("empty.png", theme_photo(), "image/png")},
+        )
+        assert none_found.status_code == 200, none_found.text
+        assert none_found.json()["detectedCount"] == 0
+        assert none_found.json()["rejected"] == []
+        assert none_found.json()["message"] == "No props were found in the image."
+    finally:
+        set_nova_client(None)
