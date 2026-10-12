@@ -195,7 +195,7 @@ export default function ThemeDetail({ themeId, onBack }) {
       <section className="panel theme-tools">
         <div>
           <p className="section-label">Theme photo</p>
-          <p className="muted">Upload one theme photo. Click the props on it. More than one can stay selected.</p>
+          <p className="muted">Upload one theme photo. Each prop gets one dot. Green is in inventory, red is not. Click a dot to highlight it.</p>
           <label>
             Upload theme photo
             <input
@@ -235,14 +235,14 @@ export default function ThemeDetail({ themeId, onBack }) {
                   type="button"
                   className={`hotspot ${selectedIds.includes(row.propId) ? "on" : ""} ${row.availability || "unavailable"}`}
                   style={{
-                    left: `${row.box.x * 100}%`,
-                    top: `${row.box.y * 100}%`,
-                    width: `${row.box.width * 100}%`,
-                    height: `${row.box.height * 100}%`,
+                    left: `${(row.box.x + row.box.width / 2) * 100}%`,
+                    top: `${(row.box.y + row.box.height / 2) * 100}%`,
                   }}
                   onClick={() => toggleProp(row.propId)}
+                  aria-pressed={selectedIds.includes(row.propId)}
                 >
-                  <span>{row.detectedObject || "Prop"}</span>
+                  <span className="dot" />
+                  <span className="hotspot-name">{row.detectedObject || "Prop"}</span>
                 </button>
               ))}
             </div>

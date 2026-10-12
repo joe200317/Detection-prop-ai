@@ -1,6 +1,7 @@
 from app.services.classify import align_verification, classify
 from app.services.nova import _box, parse_model_json
-from app.services.scene import enclose_box, union_box
+from app.services.scene import enclose_box, focused_box, union_box
+from app.services.themes import collapse_overlapping
 from app.services.vector_search import cosine, group_by_inventory
 
 
@@ -75,6 +76,28 @@ def test_box_covers_full_object_extent():
     assert covered["y"] <= 0.05
     assert covered["x"] + covered["width"] >= 0.7
     assert covered["y"] + covered["height"] >= 0.45
+
+
+def test_overlapping_labels_collapse_to_one_object():
+    cap = {"detectedObject": "Santa cap", "confidence": 0.91, "box": {"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2}}
+    hat = {"detectedObject": "red hat", "confidence": 0.62, "box": {"x": 0.12, "y": 0.12, "width": 0.18, "height": 0.18}}
+    rope = {"detectedObject": "Rope", "confidence": 0.88, "box": {"x": 0.7, "y": 0.6, "width": 0.2, "height": 0.25}}
+    kept = collapse_overlapping([hat, rope, cap])
+    assert [item["detectedObject"] for item in kept] == ["Santa cap", "Rope"]
+
+
+def test_separate_copies_stay_when_boxes_do_not_overlap():
+    first = {"detectedObject": "Mala", "confidence": 0.9, "box": {"x": 0.05, "y": 0.1, "width": 0.15, "height": 0.3}}
+    second = {"detectedObject": "Mala", "confidence": 0.86, "box": {"x": 0.7, "y": 0.2, "width": 0.15, "height": 0.3}}
+    assert len(collapse_overlapping([first, second])) == 2
+
+
+def test_refined_box_stays_on_the_original_object():
+    original = {"x": 0.2, "y": 0.2, "width": 0.15, "height": 0.15}
+    far_away = {"x": 0.7, "y": 0.7, "width": 0.2, "height": 0.2}
+    assert focused_box(original, far_away) == original
+    huge = {"x": 0.0, "y": 0.0, "width": 0.9, "height": 0.9}
+    assert focused_box(original, huge) == original
 
 
 def test_different_object_stays_unmatched():

@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,88 @@ LINK_STATUSES = {"EXACT", "SIMILAR", "NEEDS_REVIEW"}
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+_NAME_SKIP = {"the", "a", "an", "prop", "item"}
+
+
+def _name_words(value: str) -> set[str]:
+    return {word for word in re.findall(r"[a-z0-9]+", value.lower()) if word not in _NAME_SKIP}
+
+
+def _same_label(left: str, right: str) -> bool:
+    words_left = _name_words(left)
+    words_right = _name_words(right)
+    if not words_left or not words_right:
+        return False
+    smaller, larger = (words_left, words_right) if len(words_left) <= len(words_right) else (words_right, words_left)
+    return smaller <= larger
+
+
+def _box_area(box: dict[str, float]) -> float:
+    return max(float(box.get("width") or 0), 0) * max(float(box.get("height") or 0), 0)
+
+
+def _box_overlap(left: dict[str, float], right: dict[str, float]) -> float:
+    x1 = max(left["x"], right["x"])
+    y1 = max(left["y"], right["y"])
+    x2 = min(left["x"] + left["width"], right["x"] + right["width"])
+    y2 = min(left["y"] + left["height"], right["y"] + right["height"])
+    if x2 <= x1 or y2 <= y1:
+        return 0
+    return (x2 - x1) * (y2 - y1)
+
+
+def _item_box(item: dict[str, Any]) -> dict[str, float] | None:
+    box = item.get("box")
+    if isinstance(box, dict) and {"x", "y", "width", "height"} <= set(box):
+        return box
+    detection = item.get("detection")
+    nested = detection.get("box") if isinstance(detection, dict) else None
+    if isinstance(nested, dict) and {"x", "y", "width", "height"} <= set(nested):
+        return nested
+    return None
+
+
+def _item_score(item: dict[str, Any]) -> float:
+    for source in (item, item.get("detection") if isinstance(item.get("detection"), dict) else {}):
+        for key in ("detectionConfidence", "confidence", "finalConfidence"):
+            try:
+                return float(source[key])
+            except (KeyError, TypeError, ValueError):
+                continue
+    return 0
+
+
+def _same_physical_object(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_box = _item_box(left)
+    right_box = _item_box(right)
+    if left_box is None or right_box is None:
+        return False
+    overlap = _box_overlap(left_box, right_box)
+    if overlap <= 0:
+        return False
+    left_area = _box_area(left_box)
+    right_area = _box_area(right_box)
+    union = left_area + right_area - overlap
+    if union <= 0:
+        return False
+    iou = overlap / union
+    smaller = min(left_area, right_area)
+    contained = overlap / smaller if smaller else 0
+    if iou >= 0.45 or contained >= 0.72:
+        return True
+    same_name = _same_label(str(left.get("detectedObject") or ""), str(right.get("detectedObject") or ""))
+    return same_name and (iou >= 0.18 or contained >= 0.4)
+
+
+def collapse_overlapping(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    for item in sorted(items, key=_item_score, reverse=True):
+        if any(_same_physical_object(item, other) for other in kept):
+            continue
+        kept.append(item)
+    return kept
 
 
 def _public_box(prop: dict[str, Any]) -> dict[str, float] | None:
@@ -334,7 +417,7 @@ async def theme_result(db: AsyncIOMotorDatabase, theme_id: str) -> dict[str, Any
                 "candidates": prop.get("candidates") or [],
             }
         )
-    return {"theme": theme, "rows": rows}
+    return {"theme": theme, "rows": collapse_overlapping(rows)}
 
 
 async def add_inventory_image(

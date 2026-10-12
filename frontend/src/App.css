@@ -355,7 +355,7 @@ td strong,
 .stage {
   position: relative;
   border-radius: 14px;
-  overflow: hidden;
+  overflow: visible;
   background: #071633;
 }
 
@@ -363,49 +363,70 @@ td strong,
   display: block;
   width: 100%;
   height: auto;
+  border-radius: 14px;
 }
 
 button.hotspot {
   position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: 132px;
   margin: 0;
   padding: 0;
-  border: 2px solid #fff;
-  border-radius: 8px;
-  background: rgba(11, 31, 75, 0.18);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: #0b1f4b;
   box-shadow: none;
+  transform: translate(-50%, -4px);
 }
 
 button.hotspot.on {
-  border-color: #0b1f4b;
-  background: rgba(11, 31, 75, 0.35);
-  box-shadow: 0 0 0 3px rgba(11, 31, 75, 0.28);
+  z-index: 3;
 }
 
-button.hotspot.unavailable {
-  border-color: #d5e0f2;
+button.hotspot .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 0;
+  box-shadow: none;
+  flex: none;
 }
 
-button.hotspot.unavailable.on {
-  border-color: #fff;
-  background: rgba(255, 255, 255, 0.45);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35);
+button.hotspot.available .dot {
+  background: #178a45;
 }
 
-button.hotspot span {
-  position: absolute;
-  left: 6px;
-  top: 6px;
-  max-width: calc(100% - 12px);
+button.hotspot.unavailable .dot {
+  background: #e03131;
+}
+
+button.hotspot.checking .dot {
+  background: #8aa0c4;
+}
+
+button.hotspot.on .dot {
+  transform: scale(1.4);
+  box-shadow: none;
+}
+
+button.hotspot .hotspot-name {
+  max-width: 128px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 2px 6px;
   border-radius: 999px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.94);
   color: #0b1f4b;
   font-size: 11px;
   font-weight: 700;
+  line-height: 1.3;
 }
 
 .prop-list {
